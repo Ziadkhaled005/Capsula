@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import capsuleLogo from "@/assets/capsule-logo.png";
 import authBg from "@/assets/auth-bg.png";
+import { useLogin } from "@/hooks/useAuth";
 
 export const Route = createFileRoute("/login")({
   component: LoginPage,
@@ -9,23 +10,31 @@ export const Route = createFileRoute("/login")({
 
 function LoginPage() {
   const navigate = useNavigate();
+  const loginMutation = useLogin();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState(false);
+  const [loginError, setLoginError] = useState("");
 
   const passwordTooShort = password.trim().length > 0 && password.length < 8;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError(false);
+    setLoginError("");
+
     if (!email.trim() || !password.trim() || password.length < 8) {
       setError(true);
       return;
     }
-    setError(false);
-    if (email === "admin@admin.com" && password === "123456789") {
-      navigate({ to: "/pharmacies" });
-    } else {
-      navigate({ to: "/pharmacy" });
+
+    try {
+      await loginMutation.mutateAsync({
+        email: email.trim(),
+        password,
+      });
+    } catch {
+      setLoginError("فشل تسجيل الدخول. تأكد من البريد الإلكتروني وكلمة المرور.");
     }
   };
 
@@ -64,18 +73,21 @@ function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="البريد الإلكتروني"
+              autoComplete="username"
               className={`w-full h-12 rounded-full border bg-background px-5 text-sm text-right placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
                 error && !email.trim()
                   ? "border-destructive focus:ring-destructive/30"
                   : "border-border focus:ring-primary/30"
               }`}
             />
+
             <div className="space-y-1">
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="كلمة المرور"
+                autoComplete="current-password"
                 className={`w-full h-12 rounded-full border bg-background px-5 text-sm text-right placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
                   (error && !password.trim()) || passwordTooShort
                     ? "border-destructive focus:ring-destructive/30"
@@ -94,7 +106,10 @@ function LoginPage() {
           </div>
 
           {error && (!email.trim() || !password.trim()) && (
-            <div className="rounded-lg border border-destructive bg-destructive/10 text-destructive text-sm px-4 py-3 text-right">
+            <div
+              role="alert"
+              className="rounded-lg border border-destructive bg-destructive/10 text-destructive text-sm px-4 py-3 text-right"
+            >
               برجاء ادخال المستخدم و كلمة السر
             </div>
           )}
@@ -105,12 +120,23 @@ function LoginPage() {
             </div>
           )}
 
+          {loginError && (
+            <div
+              role="alert"
+              className="rounded-lg border border-destructive bg-destructive/10 text-destructive text-sm px-4 py-3 text-right"
+            >
+              {loginError}
+            </div>
+          )}
+
           <button
             type="submit"
-            disabled={!email.trim() || !password.trim() || password.length < 8}
+            disabled={
+              !email.trim() || !password.trim() || password.length < 8 || loginMutation.isPending
+            }
             className="w-full h-12 rounded-full bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary"
           >
-            تسجيل الدخول
+            {loginMutation.isPending ? "جاري تسجيل الدخول..." : "تسجيل الدخول"}
           </button>
         </form>
       </div>
