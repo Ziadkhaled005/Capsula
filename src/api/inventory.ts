@@ -1,4 +1,4 @@
-import { apiClient } from "./client";
+import { apiClient, unwrapApiResponse } from "./client";
 import type {
   InventoryFilter,
   InventoryResponse,
@@ -7,13 +7,35 @@ import type {
   UpdateInventoryItemRequest,
 } from "@/types";
 
+const STOCK_STATUS_TO_API: Record<
+  Exclude<InventoryFilter["stockStatus"], undefined | "all">,
+  number
+> = {
+  "in-stock": 0,
+  "low-stock": 1,
+  "out-of-stock": 2,
+};
+
+function toInventoryParams(filters: InventoryFilter) {
+  const { stockStatus, category, ...params } = filters;
+  const categoryId = category ? Number(category) : undefined;
+
+  return {
+    ...params,
+    ...(categoryId && Number.isFinite(categoryId) ? { categoryId } : {}),
+    ...(stockStatus && stockStatus !== "all" ? { status: STOCK_STATUS_TO_API[stockStatus] } : {}),
+  };
+}
+
 /**
  * GET /inventory
  * Fetch paginated inventory with optional search, category, and stock-status filters.
  */
 export async function getInventory(filters: InventoryFilter = {}): Promise<InventoryResponse> {
-  const { data } = await apiClient.get<InventoryResponse>("/inventory", { params: filters });
-  return data;
+  const { data } = await apiClient.get("/api/admin/inventory", {
+    params: toInventoryParams(filters),
+  });
+  return unwrapApiResponse<InventoryResponse>(data);
 }
 
 /**
@@ -21,8 +43,13 @@ export async function getInventory(filters: InventoryFilter = {}): Promise<Inven
  * Fetch a single inventory item by ID.
  */
 export async function getInventoryItem(id: string): Promise<InventoryItem> {
-  const { data } = await apiClient.get<InventoryItem>(`/inventory/${id}`);
-  return data;
+  const { data } = await apiClient.get("/api/admin/inventory", {
+    params: { search: id, pageSize: 1 },
+  });
+  const response = unwrapApiResponse<InventoryResponse>(data);
+  const item = response.data?.[0];
+  if (!item) throw new Error("Inventory item not found");
+  return item;
 }
 
 /**
@@ -37,7 +64,7 @@ export async function uploadInventory(
   const formData = new FormData();
   formData.append("file", file);
 
-  const { data } = await apiClient.post<UploadInventoryResponse>("/inventory/upload", formData, {
+  const { data } = await apiClient.post("/api/admin/inventory/bulk-update", formData, {
     headers: { "Content-Type": "multipart/form-data" },
     onUploadProgress: (e) => {
       if (onUploadProgress && e.total) {
@@ -45,7 +72,7 @@ export async function uploadInventory(
       }
     },
   });
-  return data;
+  return unwrapApiResponse<UploadInventoryResponse>(data);
 }
 
 /**
@@ -56,6 +83,9 @@ export async function updateInventoryItem(
   id: string,
   payload: UpdateInventoryItemRequest,
 ): Promise<InventoryItem> {
-  const { data } = await apiClient.patch<InventoryItem>(`/inventory/${id}`, payload);
-  return data;
+  const { data } = await apiClient.put(`/api/admin/inventory/${id}`, {
+    newQuantity: payload.stockCurrent,
+    price: payload.price,
+  });
+  return unwrapApiResponse<InventoryItem>(data);
 }

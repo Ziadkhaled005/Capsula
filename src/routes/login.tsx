@@ -9,8 +9,8 @@ export const Route = createFileRoute("/login")({
 
 function LoginPage() {
   const navigate = useNavigate();
-  const [email, setEmail] = useState("admin@admin.com");
-  const [password, setPassword] = useState("123456789");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState(false);
 
   const passwordTooShort = password.trim().length > 0 && password.length < 8;
@@ -28,7 +28,6 @@ function LoginPage() {
       navigate({ to: "/pharmacy" });
     }
   };
-
 
   return (
     <div className="min-h-screen grid grid-cols-1 md:grid-cols-2" dir="rtl">

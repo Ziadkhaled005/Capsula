@@ -1,6 +1,6 @@
-import axios, { AxiosError, type InternalAxiosRequestConfig } from "axios";
+﻿import axios, { AxiosError, type InternalAxiosRequestConfig } from "axios";
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+const BASE_URL = (import.meta.env.VITE_API_BASE_URL || "https://capsula.prognil.com").replace(/\/+$/, "");
 
 export const apiClient = axios.create({
   baseURL: BASE_URL,
@@ -33,7 +33,7 @@ apiClient.interceptors.response.use(
 
       if (refreshToken) {
         try {
-          const { data } = await axios.post(`${BASE_URL}/auth/refresh`, { refreshToken });
+          const { data } = await axios.post(`${BASE_URL}/api/Auth/Refresh`, { refreshToken });
           localStorage.setItem("accessToken", data.accessToken);
           localStorage.setItem("refreshToken", data.refreshToken);
           original.headers.Authorization = `Bearer ${data.accessToken}`;
@@ -53,3 +53,13 @@ apiClient.interceptors.response.use(
 );
 
 export const isMockMode = !BASE_URL;
+
+export function unwrapApiResponse<T>(response: unknown): T {
+  if (response && typeof response === "object") {
+    const record = response as Record<string, unknown>;
+    if ("value" in record) return record.value as T;
+    if ("data" in record) return record.data as T;
+  }
+
+  return response as T;
+}

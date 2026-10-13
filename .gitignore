@@ -38,3 +38,8 @@ package-lock.json.backup
 .env.*
 !.env.example
 !.env.*.example
+
+# Local environment secrets
+.env
+.env.*
+!.env.example

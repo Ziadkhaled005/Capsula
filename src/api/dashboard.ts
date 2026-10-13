@@ -1,4 +1,4 @@
-import { apiClient } from "./client";
+import { apiClient, unwrapApiResponse } from "./client";
 import type { DashboardResponse, Pharmacy } from "@/types";
 
 /**
@@ -6,8 +6,8 @@ import type { DashboardResponse, Pharmacy } from "@/types";
  * Fetch live dashboard stats (order counts by status, revenue, recent orders).
  */
 export async function getDashboard(): Promise<DashboardResponse> {
-  const { data } = await apiClient.get<DashboardResponse>("/dashboard");
-  return data;
+  const { data } = await apiClient.get("/api/admin/dashboard/summary");
+  return unwrapApiResponse<DashboardResponse>(data);
 }
 
 /**
@@ -15,8 +15,8 @@ export async function getDashboard(): Promise<DashboardResponse> {
  * Fetch the authenticated pharmacist's pharmacy profile.
  */
 export async function getPharmacy(): Promise<Pharmacy> {
-  const { data } = await apiClient.get<Pharmacy>("/pharmacy");
-  return data;
+  const { data } = await apiClient.get("/api/admin/pharmacy/me");
+  return unwrapApiResponse<Pharmacy>(data);
 }
 
 /**
@@ -24,8 +24,8 @@ export async function getPharmacy(): Promise<Pharmacy> {
  * Toggle whether the pharmacy is accepting new orders.
  */
 export async function setPharmacyAvailability(isAccepting: boolean): Promise<Pharmacy> {
-  const { data } = await apiClient.patch<Pharmacy>("/pharmacy/availability", {
+  const { data } = await apiClient.put("/api/admin/pharmacy/accepting-orders", {
     isAcceptingOrders: isAccepting,
   });
-  return data;
+  return unwrapApiResponse<Pharmacy>(data);
 }
