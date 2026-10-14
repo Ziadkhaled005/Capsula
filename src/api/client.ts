@@ -52,8 +52,6 @@ apiClient.interceptors.response.use(
   },
 );
 
-export const isMockMode = !BASE_URL;
-
 export function unwrapApiResponse<T>(response: unknown): T {
   if (response && typeof response === "object") {
     const record = response as Record<string, unknown>;

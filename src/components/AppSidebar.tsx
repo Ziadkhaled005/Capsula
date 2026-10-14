@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
+import { Link, useRouterState } from "@tanstack/react-router";
 import {
   PieChart,
   FileText,
@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import capsuleLogo from "@/assets/capsule-logo.png";
+import { getCurrentUser, useLogout } from "@/hooks/useAuth";
 
 const items = [
   { title: "لوحة التحكم", url: "/dashboard", icon: PieChart },
@@ -25,7 +26,8 @@ const items = [
 
 export function AppSidebar() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const navigate = useNavigate();
+  const user = getCurrentUser();
+  const logout = useLogout();
   const [collapsed, setCollapsed] = useState(false);
 
   return (
@@ -59,9 +61,9 @@ export function AppSidebar() {
         {!collapsed && (
           <div className="mt-5 flex items-center gap-2 rounded-full border border-sidebar-border px-3 py-2">
             <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary">
-              أ
+              {user?.name.slice(0, 1) ?? "؟"}
             </div>
-            <span className="text-sm text-sidebar-foreground flex-1 text-right">أحمد محمد - العمليات</span>
+            <span className="text-sm text-sidebar-foreground flex-1 text-right">{user?.name ?? "المستخدم"}</span>
           </div>
         )}
       </div>
@@ -93,7 +95,7 @@ export function AppSidebar() {
       {/* Logout */}
       <div className="p-4 border-t border-sidebar-border">
         <button
-          onClick={() => navigate({ to: "/login" })}
+          onClick={() => logout.mutate()}
           className={cn(
             "flex items-center gap-3 rounded-xl text-sm font-medium text-muted-foreground hover:bg-sidebar-accent w-full flex-row-reverse text-right",
             collapsed ? "justify-center px-2 py-3" : "px-4 py-3",

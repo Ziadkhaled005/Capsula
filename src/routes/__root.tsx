@@ -6,10 +6,12 @@ import {
   HeadContent,
   Scripts,
   useRouterState,
+  redirect,
 } from "@tanstack/react-router";
 import appCss from "../styles.css?url";
 import { AppSidebar } from "@/components/AppSidebar";
 import { Toaster } from "@/components/ui/sonner";
+import { getCurrentUser } from "@/hooks/useAuth";
 
 // Create one shared QueryClient for the entire application.
 const queryClient = new QueryClient();
@@ -32,6 +34,34 @@ function NotFoundComponent() {
 }
 
 export const Route = createRootRoute({
+  beforeLoad: ({ location }) => {
+    if (typeof window === "undefined") return;
+
+    const pathname = location.pathname;
+    const isPublic =
+      pathname === "/login" ||
+      pathname === "/forgot-password" ||
+      pathname === "/email-sent" ||
+      pathname === "/reset-password" ||
+      pathname.startsWith("/customer/order/");
+    if (isPublic) return;
+
+    const user = getCurrentUser();
+    if (!user) {
+      throw redirect({ to: "/login" });
+    }
+
+    if (pathname.startsWith("/pharmacy")) {
+      if (user.role !== "pharmacist") {
+        throw redirect({ to: "/pharmacies" });
+      }
+      return;
+    }
+
+    if (user.role !== "admin") {
+      throw redirect({ to: "/pharmacy" });
+    }
+  },
   head: () => ({
     meta: [
       { charSet: "utf-8" },

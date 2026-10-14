@@ -1,32 +1,17 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
 import {
   Truck,
   PauseCircle,
   PackageOpen,
   Receipt,
-  RefreshCw,
-  Phone,
-  MapPin,
-  Clock,
-  Wallet,
-  CreditCard,
   Gavel,
-  Trophy,
-  BadgePercent,
+  RefreshCw,
 } from "lucide-react";
-import remainingTimeIcon from "../../attached_assets/Leading_Icon_1790878708496.png";
 import newOrdersIcon from "@/assets/new-orders-icon.png";
 import preparingIcon from "@/assets/preparing-icon.png";
 import { cn } from "@/lib/utils";
-import {
-  saveOrderStatus,
-  subscribeToOrderStatusUpdates,
-  withSavedOrderStatuses,
-} from "@/lib/pharmacy-order-status-store";
-import { initializeSampleOrdersAtOpenBidding } from "@/lib/pharmacy-order-initial-state";
-import { initialOrders, statusBadge, OrderDetailsPanel } from "./pharmacy.orders";
-import type { Order, StatusKey } from "./pharmacy.orders";
+import { useDashboard } from "@/hooks/useDashboard";
+import type { OrderStatus } from "@/types";
 
 export const Route = createFileRoute("/pharmacy/")({
   head: () => ({
@@ -46,51 +31,29 @@ const toneMap: Record<Tone, string> = {
 };
 
 function PharmacyDashboard() {
-  const [orderList, setOrderList] = useState<Order[]>(initialOrders);
-  const [selected, setSelected] = useState<Order | null>(null);
-
-  useEffect(() => {
-    const refreshOrders = () => {
-      initializeSampleOrdersAtOpenBidding(initialOrders.map((order) => order.orderNo));
-      setOrderList(withSavedOrderStatuses(initialOrders));
-    };
-    refreshOrders();
-    return subscribeToOrderStatusUpdates(refreshOrders);
-  }, []);
-
-  const handleStatusChange = (orderNo: string, status: Exclude<StatusKey, "all">) => {
-    saveOrderStatus(orderNo, status);
-    setOrderList((prev) => prev.map((o) => (o.orderNo === orderNo ? { ...o, status } : o)));
+  const dashboard = useDashboard();
+  const stats = dashboard.data?.stats;
+  const recentOrders = dashboard.data?.recentOrders ?? [];
+  const liveStats: { id: string; label: string; value: number; icon: typeof Truck; tone: Tone }[] = stats
+    ? [
+        { id: "confirmed-orders", label: "طلبات اليوم", value: stats.ordersToday, icon: Receipt, tone: "primary" },
+        { id: "preparing", label: "طلبات قيد التجهيز", value: stats.preparing, icon: PackageOpen, tone: "purple" },
+        { id: "on-hold", label: "طلبات معلقة", value: stats.onHold, icon: PauseCircle, tone: "warning" },
+        { id: "delivered", label: "طلبات تم توصيلها", value: stats.delivered, icon: Truck, tone: "primary" },
+        { id: "on-delivery", label: "طلبات قيد التوصيل", value: stats.onDelivery, icon: Truck, tone: "primary" },
+        ...(stats.openBidding === undefined ? [] : [{ id: "open-bidding", label: "مزايدات مفتوحة", value: stats.openBidding, icon: Gavel, tone: "warning" as const }]),
+      ]
+    : [];
+  const orderStatusLabels: Record<OrderStatus, string> = {
+    "open-bidding": "مزايدة مفتوحة",
+    "on-hold": "الطلب معلق",
+    "awaiting-customer-confirmation": "بانتظار العميل",
+    confirmed: "تم التأكيد",
+    preparing: "جاري التجهيز",
+    "on-delivery": "في طريق التوصيل",
+    delivered: "تم التوصيل",
+    cancelled: "تم الإلغاء",
   };
-
-  const selectedFromList = selected
-    ? (orderList.find((o) => o.orderNo === selected.orderNo) ?? null)
-    : null;
-
-  const counts = {
-    confirmed: orderList.filter((o) => o.status === "confirmed").length,
-    incomingBids: orderList.filter((o) => o.status === "open-bidding").length,
-    preparing: orderList.filter((o) => o.status === "preparing").length,
-    onHold: orderList.filter((o) => o.status === "on-hold").length,
-    delivered: orderList.filter((o) => o.status === "delivered").length,
-  };
-
-  const liveStats: { id: string; label: string; value: number | string; icon: typeof Truck; tone: Tone }[] = [
-    { id: "confirmed-orders", label: "طلبات تم تأكيدها اليوم", value: counts.confirmed, icon: Receipt, tone: "primary" },
-    { id: "preparing", label: "طلب يتم تحضيره", value: counts.preparing, icon: PackageOpen, tone: "purple" },
-    {
-      id: "on-hold",
-      label: "طلبات تحتاج تأكيد البديل",
-      value: counts.onHold,
-      icon: PauseCircle,
-      tone: "warning",
-    },
-    { id: "delivered", label: "طلب تم توصيله اليوم", value: counts.delivered, icon: Truck, tone: "primary" },
-    { id: "incoming-bids", label: "طلبات مزايدة واردة اليوم", value: counts.incomingBids, icon: Gavel, tone: "warning" },
-    { id: "weekly-offers", label: "عروض مقدمة هذا الأسبوع", value: 18, icon: Receipt, tone: "danger" },
-    { id: "bid-win-rate", label: "نسبة الفوز بالمزايدات", value: "89%", icon: Trophy, tone: "success" },
-    { id: "average-discount", label: "متوسط خصمك (السوق 9%)", value: "10%", icon: BadgePercent, tone: "warning" },
-  ];
 
   return (
     <div>
@@ -101,6 +64,14 @@ function PharmacyDashboard() {
       </div>
 
       {/* Stats */}
+      {dashboard.isLoading ? (
+        <p role="status" className="py-8 text-center text-sm text-muted-foreground">جارٍ تحميل بيانات لوحة التحكم...</p>
+      ) : dashboard.isError ? (
+        <div role="alert" className="py-8 text-center text-sm text-destructive">
+          <p>تعذر تحميل بيانات لوحة التحكم.</p>
+          <button type="button" onClick={() => void dashboard.refetch()} className="mt-2 underline">إعادة المحاولة</button>
+        </div>
+      ) : (
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6" dir="rtl">
         {liveStats.map((s) => (
           <div
@@ -110,9 +81,9 @@ function PharmacyDashboard() {
           >
             <div className="flex items-start justify-between">
               <div className={cn("h-9 w-9 rounded-lg flex items-center justify-center", toneMap[s.tone])}>
-                {s.label === "طلبات تم تأكيدها اليوم"
+                {s.id === "confirmed-orders"
                   ? <img src={newOrdersIcon} alt="" className="h-5 w-5 object-contain" />
-                  : s.label === "طلب يتم تحضيره"
+                  : s.id === "preparing"
                   ? <img src={preparingIcon} alt="" className="h-5 w-5 object-contain" />
                   : <s.icon className="h-5 w-5" />
                 }
@@ -125,6 +96,7 @@ function PharmacyDashboard() {
           </div>
         ))}
       </div>
+      )}
 
       {/* Recent orders */}
       <div className="bg-card rounded-2xl border border-border shadow-sm">
@@ -140,71 +112,42 @@ function PharmacyDashboard() {
         </div>
 
         <div className="p-6 space-y-3" dir="rtl">
-          {orderList.map((o, i) => {
-            const badge = statusBadge[o.status];
-            const isSelected = selected?.orderNo === o.orderNo;
+          {recentOrders.map((order) => {
             return (
               <div
-                key={i}
-                onClick={() => setSelected(o)}
-                className={cn(
-                  "rounded-xl border border-border bg-card p-5 transition-colors cursor-pointer hover:bg-[#f0f4f2]",
-                  isSelected && "bg-[#f0f4f2]",
-                )}
-                tabIndex={0}
+                key={order.id}
+                className="rounded-xl border border-border bg-card p-5"
               >
                 <div className="flex items-start justify-between gap-4">
                   <div className="text-right">
-                    <div className="text-base font-bold text-foreground">{o.customer}</div>
-                    <div className="text-xs text-muted-foreground mt-1">رقم الطلب: #{o.orderNo}</div>
-                    <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
-                      <Phone className="h-3.5 w-3.5 shrink-0" />
-                      <span>{o.phone}</span>
-                      <MapPin className="h-3.5 w-3.5 shrink-0 mr-1" />
-                      <span className="truncate max-w-[28ch]">{o.address}</span>
-                    </div>
+                    <div className="text-base font-bold text-foreground">{order.customerName}</div>
+                    <div className="text-xs text-muted-foreground mt-1">رقم الطلب: #{order.orderNo}</div>
+                    <div className="mt-2 text-xs text-muted-foreground">{order.customerPhone} · {order.address}</div>
                   </div>
-                  <span className={cn("inline-flex items-center rounded-lg border px-3 py-1.5 text-xs font-medium shrink-0", badge.className)}>
-                    {badge.label}
+                  <span className="inline-flex items-center rounded-lg border px-3 py-1.5 text-xs font-medium shrink-0">
+                    {orderStatusLabels[order.status]}
                   </span>
                 </div>
                 <div className="mt-4 grid gap-2 text-sm text-muted-foreground">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4 text-sm">
-                      {o.remaining && (
-                        <span className="inline-flex items-center gap-1.5">
-                          <img
-                            src={remainingTimeIcon}
-                            alt=""
-                            aria-hidden="true"
-                            className="h-4 w-4 shrink-0 object-contain"
-                          />
-                          <span className="text-[#E87919]">الوقت المتبقي ({o.remaining})</span>
-                        </span>
-                      )}
-                      <span className="inline-flex items-center gap-1.5">
-                        <span>{o.payment === "cash" ? "نقد" : "بطاقة ائتمان"}</span>
-                        {o.payment === "cash" ? <Wallet className="h-4 w-4" /> : <CreditCard className="h-4 w-4" />}
-                      </span>
-                      <span className="inline-flex items-center gap-1.5">
-                        <span>{o.time}</span>
-                        <Clock className="h-4 w-4" />
-                      </span>
-                    </div>
+                    <div className="text-xs">{order.payment === "cash" ? "نقد" : "بطاقة ائتمان"} · {new Date(order.createdAt).toLocaleString()}</div>
                     <div className="text-right">
-                      <div className="text-xs text-muted-foreground">{o.items} منتجات</div>
-                      <div className="text-success font-bold mt-1">{o.price.toFixed(2)} ج.م</div>
+                      <div className="text-xs text-muted-foreground">{order.itemsCount} منتجات</div>
+                      <div className="text-success font-bold mt-1">{order.total.toFixed(2)} ج.م</div>
                     </div>
                   </div>
                 </div>
               </div>
             );
           })}
+          {!dashboard.isLoading && !dashboard.isError && recentOrders.length === 0 && (
+            <p className="py-10 text-center text-sm text-muted-foreground">لا توجد طلبات حديثة.</p>
+          )}
 
           <div className="flex justify-center pt-2">
             <button
               type="button"
-              onClick={() => window.location.reload()}
+              onClick={() => void dashboard.refetch()}
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90"
             >
               <RefreshCw className="h-4 w-4" />
@@ -214,11 +157,6 @@ function PharmacyDashboard() {
         </div>
       </div>
 
-      <OrderDetailsPanel
-        order={selectedFromList}
-        onClose={() => setSelected(null)}
-        onStatusChange={handleStatusChange}
-      />
     </div>
   );
 }

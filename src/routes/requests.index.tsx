@@ -1,9 +1,7 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { Search, ChevronDown, Eye } from "lucide-react";
+import { createFileRoute } from "@tanstack/react-router";
+import { Search, ChevronDown } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { TableShell } from "@/components/DataTable";
-import { StatusBadge } from "@/components/StatusBadge";
-import { getDecision, getCheck, useDecisionsVersion } from "@/lib/requestsStore";
 
 export const Route = createFileRoute("/requests/")({
   head: () => ({
@@ -11,24 +9,6 @@ export const Route = createFileRoute("/requests/")({
   }),
   component: Requests,
 });
-
-const rows = [
-  { pharmacy: "صيدلية الشفاء", date: "05/01/2024", time: "14:30", count: 332, check: "all-allowed", status: "accepted" },
-  { pharmacy: "صيدلية الشفاء", date: "05/01/2024", time: "14:30", count: 332, check: "all-allowed", status: "accepted" },
-  { pharmacy: "صيدلية الشفاء", date: "05/01/2024", time: "14:30", count: 332, check: "not-allowed", status: "rejected" },
-  { pharmacy: "صيدلية الشفاء", date: "05/01/2024", time: "14:30", count: 332, check: "all-allowed", status: "review" },
-  { pharmacy: "صيدلية الشفاء", date: "05/01/2024", time: "14:30", count: 332, check: "all-allowed", status: "review" },
-] as const;
-
-const checkMap = {
-  "all-allowed": { label: "جميع المنتجات مسموحة", variant: "success" as const },
-  "not-allowed": { label: "منتجات غير مسموحة", variant: "danger" as const },
-};
-const statusMap = {
-  accepted: { label: "مقبول", variant: "success" as const },
-  rejected: { label: "مرفوض", variant: "danger" as const },
-  review: { label: "قيد المراجعة", variant: "warning" as const },
-};
 
 function FilterPill({ label, value }: { label: string; value: string }) {
   return (
@@ -43,7 +23,6 @@ function FilterPill({ label, value }: { label: string; value: string }) {
 }
 
 function Requests() {
-  useDecisionsVersion();
   return (
     <div>
       <PageHeader
@@ -79,32 +58,11 @@ function Requests() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((r, i) => {
-              const id = String(i + 1);
-              const override = getDecision(id);
-              const status = override ?? r.status;
-              const checkOverride = getCheck(id);
-              const check = checkOverride ?? r.check;
-              return (
-              <tr key={i} className="border-b border-border last:border-0 hover:bg-muted/30">
-                <td className="px-6 py-4">{r.pharmacy}</td>
-                <td className="px-6 py-4 text-muted-foreground">{r.time}  {r.date}</td>
-                <td className="px-6 py-4">{r.count}</td>
-                <td className="px-6 py-4">
-                  <StatusBadge variant={checkMap[check].variant}>{checkMap[check].label}</StatusBadge>
-                </td>
-                <td className="px-6 py-4">
-                  <StatusBadge variant={statusMap[status].variant}>{statusMap[status].label}</StatusBadge>
-                </td>
-                <td className="px-6 py-4">
-                  <Link to="/requests/$id" params={{ id }} className="inline-flex items-center gap-1.5 text-sm text-foreground hover:text-primary">
-                    <Eye className="h-4 w-4" />
-                    مراجعة الطلب
-                  </Link>
-                </td>
-              </tr>
-              );
-            })}
+            <tr>
+              <td colSpan={6} className="px-6 py-10 text-center text-muted-foreground">
+                غير متاح: لا توجد واجهة خلفية لجلب طلبات تحديث المخزون وحالاتها ونتائج التحقق.
+              </td>
+            </tr>
           </tbody>
         </table>
       </TableShell>

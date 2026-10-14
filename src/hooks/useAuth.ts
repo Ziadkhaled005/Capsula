@@ -1,7 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { AuthAPI, isMockMode } from "@/api";
-import { MOCK_CREDENTIALS } from "@/mock/auth";
+import { AuthAPI } from "@/api";
 import type { LoginRequest, LoginResponse } from "@/types";
 
 function saveSession(response: LoginResponse) {
@@ -20,22 +19,7 @@ export function useLogin() {
   const navigate = useNavigate();
 
   return useMutation({
-    mutationFn: async (payload: LoginRequest): Promise<LoginResponse> => {
-      if (isMockMode) {
-        const key = `${payload.email.trim()}:${payload.password}`;
-        const match = MOCK_CREDENTIALS[key];
-
-        // Never accept arbitrary credentials in mock mode.
-        if (!match) {
-          throw new Error("Invalid email or password");
-        }
-
-        return match;
-      }
-
-      // Production authentication is handled by the backend.
-      return AuthAPI.login(payload);
-    },
+    mutationFn: (payload: LoginRequest): Promise<LoginResponse> => AuthAPI.login(payload),
 
     onSuccess: (data) => {
       // Do not save a session with an invalid role or missing token.
@@ -64,11 +48,7 @@ export function useLogout() {
   const navigate = useNavigate();
 
   return useMutation({
-    mutationFn: async () => {
-      if (!isMockMode) {
-        await AuthAPI.logout();
-      }
-    },
+    mutationFn: () => AuthAPI.logout(),
 
     onSettled: () => {
       clearSession();
@@ -77,10 +57,16 @@ export function useLogout() {
   });
 }
 
-export function useCurrentUser() {
-  const raw = localStorage.getItem("user");
+export function getCurrentUser() {
+  if (typeof window === "undefined") {
+    return null;
+  }
 
-  if (!raw) {
+  const raw = localStorage.getItem("user");
+  const accessToken = localStorage.getItem("accessToken");
+
+  if (!raw || !accessToken) {
+    clearSession();
     return null;
   }
 

@@ -1,6 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { InventoryAPI, isMockMode } from "@/api";
-import { MOCK_INVENTORY_RESPONSE } from "@/mock/inventory";
+import { InventoryAPI } from "@/api";
 import type { InventoryFilter, UpdateInventoryItemRequest } from "@/types";
 
 export const INVENTORY_KEYS = {
@@ -11,15 +10,11 @@ export const INVENTORY_KEYS = {
 
 /**
  * Fetch paginated/filtered inventory items.
- * Falls back to mock data when VITE_API_BASE_URL is not set.
  */
 export function useInventory(filters: InventoryFilter = {}) {
   return useQuery({
     queryKey: INVENTORY_KEYS.list(filters),
-    queryFn: async () => {
-      if (isMockMode) return MOCK_INVENTORY_RESPONSE;
-      return InventoryAPI.getInventory(filters);
-    },
+    queryFn: () => InventoryAPI.getInventory(filters),
     staleTime: 60_000,
   });
 }
@@ -36,27 +31,7 @@ export function useUploadInventory() {
     }: {
       file: File;
       onProgress?: (pct: number) => void;
-    }) => {
-      if (isMockMode) {
-        return new Promise<ReturnType<typeof InventoryAPI.uploadInventory>>((resolve) =>
-          setTimeout(
-            () =>
-              resolve(
-                Promise.resolve({
-                  success: true,
-                  imported: 8,
-                  skipped: 0,
-                  errors: [],
-                  fileName: file.name,
-                  uploadedAt: new Date().toISOString(),
-                }),
-              ),
-            2500,
-          ),
-        );
-      }
-      return InventoryAPI.uploadInventory(file, onProgress);
-    },
+    }) => InventoryAPI.uploadInventory(file, onProgress),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: INVENTORY_KEYS.all });
     },
@@ -69,10 +44,8 @@ export function useUploadInventory() {
 export function useUpdateInventoryItem() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, payload }: { id: string; payload: UpdateInventoryItemRequest }) => {
-      if (isMockMode) return Promise.resolve({ id } as any);
-      return InventoryAPI.updateInventoryItem(id, payload);
-    },
+    mutationFn: ({ id, payload }: { id: string; payload: UpdateInventoryItemRequest }) =>
+      InventoryAPI.updateInventoryItem(id, payload),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: INVENTORY_KEYS.all });
     },

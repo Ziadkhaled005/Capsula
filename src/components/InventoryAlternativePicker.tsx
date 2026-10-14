@@ -8,8 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { InventoryAPI, isMockMode } from "@/api";
-import { MOCK_INVENTORY } from "@/mock/inventory";
+import { InventoryAPI } from "@/api";
 import type { InventoryItem } from "@/types";
 import type { OrderItem } from "@/routes/pharmacy.orders";
 import panadolAdvance from "../../attached_assets/offer-panadol-advance.png";
@@ -67,9 +66,7 @@ export function InventoryAlternativePicker({
       setLoadError(false);
 
       try {
-        const response = isMockMode
-          ? { data: MOCK_INVENTORY }
-          : await InventoryAPI.getInventory({ stockStatus: "in-stock", pageSize: 100 });
+        const response = await InventoryAPI.getInventory({ stockStatus: "in-stock", pageSize: 100 });
 
         if (current) {
           const requestedName = normalizeProductName(requestedProduct.name);

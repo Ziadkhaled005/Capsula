@@ -1,4 +1,4 @@
-import { createFileRoute, Outlet, Link, useRouterState, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Outlet, Link, useRouterState } from "@tanstack/react-router";
 import {
   PieChart,
   FileText,
@@ -39,11 +39,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import capsuleLogo from "@/assets/capsule-logo.png";
-import { orders } from "./pharmacy.orders";
-import { subscribeToOrderStatusUpdates, withSavedOrderStatuses } from "@/lib/pharmacy-order-status-store";
-import { initializeSampleOrdersAtOpenBidding } from "@/lib/pharmacy-order-initial-state";
-
-const toAr = (n: number) => n.toString().replace(/\d/g, (d) => "٠١٢٣٤٥٦٧٨٩"[+d]);
+import { useLogout } from "@/hooks/useAuth";
+import { usePharmacy, useSetPharmacyAvailability } from "@/hooks/useDashboard";
 
 export const Route = createFileRoute("/pharmacy")({
   component: () => (
@@ -64,8 +61,11 @@ const navItems = [
 function PharmacyLayout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const isOfferPage = pathname.startsWith("/pharmacy/offer/");
-  const navigate = useNavigate();
-  const [available, setAvailable] = useState(true);
+  const pharmacyQuery = usePharmacy();
+  const availabilityMutation = useSetPharmacyAvailability();
+  const logout = useLogout();
+  const available = pharmacyQuery.data?.isAcceptingOrders;
+  const [availabilityError, setAvailabilityError] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const { uploadNotification, setUploadNotification, showSuccessAlert, setShowSuccessAlert } = useUpload();
@@ -83,21 +83,6 @@ function PharmacyLayout() {
     const t = setTimeout(() => setShowSuccessAlert(false), 5000);
     return () => clearTimeout(t);
   }, [showSuccessAlert, setShowSuccessAlert]);
-
-  const [alternativeConfirmationCount, setAlternativeConfirmationCount] = useState(
-    () => orders.filter((o) => o.status === "on-hold").length,
-  );
-
-  useEffect(() => {
-    const refreshCount = () => {
-      initializeSampleOrdersAtOpenBidding(orders.map((order) => order.orderNo));
-      setAlternativeConfirmationCount(
-        withSavedOrderStatuses(orders).filter((o) => o.status === "on-hold").length,
-      );
-    };
-    refreshCount();
-    return subscribeToOrderStatusUpdates(refreshCount);
-  }, []);
 
   return (
     <TooltipProvider delayDuration={150}>
@@ -169,7 +154,9 @@ function PharmacyLayout() {
               <div className="flex items-center gap-3 text-right">
                 <div>
                   <div className="text-sm font-semibold text-muted-foreground">كبسولة</div>
-                  <div className="text-base font-bold text-sidebar-foreground mt-0.5">صيدلية فينوس</div>
+                  <div className="text-base font-bold text-sidebar-foreground mt-0.5">
+                    {pharmacyQuery.data?.name ?? (pharmacyQuery.isLoading ? "جارٍ تحميل الصيدلية..." : "الصيدلية")}
+                  </div>
                 </div>
                 <img src={capsuleLogo} alt="كبسولة" className="h-5 w-auto -rotate-45" />
               </div>
@@ -184,13 +171,19 @@ function PharmacyLayout() {
                   ? "w-12 h-12 mx-auto justify-center"
                   : "w-full justify-between gap-2 px-4 py-2",
               )}
-              aria-label={available ? "متاح لاستقبال طلبات" : "غير متاح لاستقبال طلبات"}
+              aria-label={
+                available === undefined
+                  ? "حالة استقبال الطلبات غير متاحة"
+                  : available
+                    ? "متاح لاستقبال طلبات"
+                    : "غير متاح لاستقبال طلبات"
+              }
             >
               {collapsed ? (
                 <span
                   className={cn(
                     "h-3 w-3 rounded-full",
-                    available ? "bg-success" : "bg-muted-foreground",
+                    available === true ? "bg-success" : available === false ? "bg-muted-foreground" : "bg-muted",
                   )}
                 />
               ) : (
@@ -198,12 +191,18 @@ function PharmacyLayout() {
                   <ChevronDown className="h-4 w-4 text-muted-foreground" />
                   <div className="flex items-center gap-2 flex-1 justify-end">
                     <span className="text-sm text-sidebar-foreground">
-                      {available ? "متاح لاستقبال طلبات" : "غير متاح لاستقبال طلبات"}
+                      {available === undefined
+                        ? pharmacyQuery.isLoading
+                          ? "جارٍ تحميل الحالة"
+                          : "تعذر تحميل الحالة"
+                        : available
+                          ? "متاح لاستقبال طلبات"
+                          : "غير متاح لاستقبال طلبات"}
                     </span>
                     <span
                       className={cn(
                         "h-2.5 w-2.5 rounded-full",
-                        available ? "bg-success" : "bg-[color:var(--chart-5)]",
+                        available === true ? "bg-success" : available === false ? "bg-[color:var(--chart-5)]" : "bg-muted",
                       )}
                     />
                   </div>
@@ -211,10 +210,23 @@ function PharmacyLayout() {
               )}
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-[15rem]">
-              <DropdownMenuItem onClick={() => setAvailable(true)} className="justify-end text-right">
+              <DropdownMenuItem
+                onClick={() => {
+                  setAvailabilityError("");
+                  availabilityMutation.mutate(true, {
+                    onError: () => setAvailabilityError("تعذر تحديث حالة استقبال الطلبات."),
+                  });
+                }}
+                disabled={availabilityMutation.isPending}
+                className="justify-end text-right"
+              >
                 متاح لاستقبال طلبات
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setConfirmOpen(true)} className="justify-end text-right">
+              <DropdownMenuItem
+                onClick={() => setConfirmOpen(true)}
+                disabled={availabilityMutation.isPending}
+                className="justify-end text-right"
+              >
                 غير متاح لاستقبال طلبات
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -237,13 +249,6 @@ function PharmacyLayout() {
                     : "text-sidebar-foreground hover:bg-sidebar-accent rounded-xl",
                 )}
               >
-                {!collapsed &&
-                  item.url === "/pharmacy/orders" &&
-                  alternativeConfirmationCount > 0 && (
-                    <span className="text-xs font-bold px-2 py-0.5 rounded-full min-w-[1.5rem] text-center shrink-0 bg-[color:var(--warning)] text-[color:var(--color-black)]">
-                      {toAr(alternativeConfirmationCount)}
-                    </span>
-                  )}
                 {!collapsed && <span className="flex-1">{item.title}</span>}
                 <item.icon className="h-5 w-5 shrink-0" />
               </Link>
@@ -257,6 +262,14 @@ function PharmacyLayout() {
             );
           })}
         </nav>
+        {pharmacyQuery.isError && (
+          <p role="alert" className="mx-4 mb-3 text-xs text-destructive">
+            تعذر تحميل بيانات الصيدلية وحالة استقبال الطلبات.
+          </p>
+        )}
+        {availabilityError && (
+          <p role="alert" className="mx-4 mb-3 text-xs text-destructive">{availabilityError}</p>
+        )}
 
         {/* Upload notification card */}
         {uploadNotification && !collapsed && (
@@ -290,7 +303,7 @@ function PharmacyLayout() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
-                  onClick={() => navigate({ to: "/login" })}
+                  onClick={() => logout.mutate()}
                   aria-label="تسجيل الخروج"
                   className="flex items-center justify-center rounded-xl text-muted-foreground hover:bg-sidebar-accent w-full px-2 py-3"
                 >
@@ -301,7 +314,7 @@ function PharmacyLayout() {
             </Tooltip>
           ) : (
             <button
-              onClick={() => navigate({ to: "/login" })}
+              onClick={() => logout.mutate()}
               className="flex items-center gap-3 rounded-xl text-sm font-medium text-muted-foreground hover:bg-sidebar-accent w-full flex-row-reverse text-right px-4 py-3"
             >
               <LogOut className="h-5 w-5" />
@@ -346,34 +359,39 @@ function PharmacyLayout() {
               variant="destructive"
               className="rounded-lg px-5"
               onClick={() => {
-                setAvailable(false);
-                setConfirmOpen(false);
-                toast.custom(
-                  (t) => (
-                    <div
-                      dir="rtl"
-                      className="w-[420px] rounded-xl border border-success/30 bg-success/10 px-5 py-4 shadow-lg flex items-start gap-3"
-                    >
-                      <button
-                        onClick={() => toast.dismiss(t)}
-                        aria-label="إغلاق"
-                        className="text-success/70 hover:text-success shrink-0 mt-0.5"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                      <div className="flex-1 text-right">
-                        <div className="flex items-center justify-end gap-2 text-success font-bold text-sm">
-                          <span>تم إيقاف استقبال الطلبات</span>
-                          <CheckCircle2 className="h-5 w-5" />
+                setAvailabilityError("");
+                availabilityMutation.mutate(false, {
+                  onError: () => setAvailabilityError("تعذر تحديث حالة استقبال الطلبات."),
+                  onSuccess: () => {
+                    setConfirmOpen(false);
+                    toast.custom(
+                      (t) => (
+                        <div
+                          dir="rtl"
+                          className="w-[420px] rounded-xl border border-success/30 bg-success/10 px-5 py-4 shadow-lg flex items-start gap-3"
+                        >
+                          <button
+                            onClick={() => toast.dismiss(t)}
+                            aria-label="إغلاق"
+                            className="text-success/70 hover:text-success shrink-0 mt-0.5"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                          <div className="flex-1 text-right">
+                            <div className="flex items-center justify-end gap-2 text-success font-bold text-sm">
+                              <span>تم إيقاف استقبال الطلبات</span>
+                              <CheckCircle2 className="h-5 w-5" />
+                            </div>
+                            <p className="mt-1 text-xs text-success/80 leading-relaxed">
+                              لن يتمكّن العملاء من الشراء حتى تصبح متاح لإستقبال الطلبات.
+                            </p>
+                          </div>
                         </div>
-                        <p className="mt-1 text-xs text-success/80 leading-relaxed">
-                          لن يتمكّن العملاء من الشراء حتى تصبح متاح لإستقبال الطلبات.
-                        </p>
-                      </div>
-                    </div>
-                  ),
-                  { duration: 4000 },
-                );
+                      ),
+                      { duration: 4000 },
+                    );
+                  },
+                });
               }}
             >
               إيقاف استقبال الطلبات

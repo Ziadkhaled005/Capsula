@@ -1,6 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { DashboardAPI, isMockMode } from "@/api";
-import { MOCK_DASHBOARD } from "@/mock/dashboard";
+import { DashboardAPI } from "@/api";
 
 export const DASHBOARD_KEYS = {
   all: ["dashboard"] as const,
@@ -10,15 +9,11 @@ export const DASHBOARD_KEYS = {
 
 /**
  * Fetch live dashboard stats and recent orders.
- * Falls back to mock data when VITE_API_BASE_URL is not set.
  */
 export function useDashboard() {
   return useQuery({
     queryKey: DASHBOARD_KEYS.stats(),
-    queryFn: async () => {
-      if (isMockMode) return MOCK_DASHBOARD;
-      return DashboardAPI.getDashboard();
-    },
+    queryFn: DashboardAPI.getDashboard,
     refetchInterval: 60_000,
     staleTime: 30_000,
   });
@@ -30,20 +25,7 @@ export function useDashboard() {
 export function usePharmacy() {
   return useQuery({
     queryKey: DASHBOARD_KEYS.pharmacy(),
-    queryFn: async () => {
-      if (isMockMode) {
-        return {
-          id: "pharmacy-001",
-          name: "صيدلية فينوس",
-          address: "القاهرة الجديدة",
-          phone: "01234567890",
-          email: "venus@pharmacy.com",
-          isAcceptingOrders: true,
-          createdAt: new Date().toISOString(),
-        };
-      }
-      return DashboardAPI.getPharmacy();
-    },
+    queryFn: DashboardAPI.getPharmacy,
     staleTime: 300_000,
   });
 }
@@ -54,10 +36,7 @@ export function usePharmacy() {
 export function useSetPharmacyAvailability() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (isAccepting: boolean) => {
-      if (isMockMode) return Promise.resolve({ isAcceptingOrders: isAccepting } as any);
-      return DashboardAPI.setPharmacyAvailability(isAccepting);
-    },
+    mutationFn: DashboardAPI.setPharmacyAvailability,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: DASHBOARD_KEYS.pharmacy() });
     },
