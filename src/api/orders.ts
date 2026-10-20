@@ -21,6 +21,7 @@ const ORDER_STATUS_TO_API: Record<Exclude<OrdersFilter["status"], undefined | "a
 
 function toOrderParams(filters: OrdersFilter) {
   const { status, ...params } = filters;
+
   return {
     ...params,
     ...(status && status !== "all" ? { status: ORDER_STATUS_TO_API[status] } : {}),
@@ -32,8 +33,35 @@ function toOrderParams(filters: OrdersFilter) {
  * Fetch a paginated, filterable list of orders for the pharmacy.
  */
 export async function getOrders(filters: OrdersFilter = {}): Promise<OrdersResponse> {
-  const { data } = await apiClient.get("/api/admin/orders", { params: toOrderParams(filters) });
-  return unwrapApiResponse<OrdersResponse>(data);
+  const { data } = await apiClient.get("/api/admin/orders", {
+    params: toOrderParams(filters),
+  });
+
+  const result = unwrapApiResponse<unknown>(data);
+
+  // Handle an API response where the unwrapped value is an array.
+  if (Array.isArray(result)) {
+    const orders = result as Order[];
+
+    return {
+      data: orders,
+      total: orders.length,
+      page: filters.page ?? 1,
+      pageSize: filters.pageSize ?? orders.length,
+      totalPages: orders.length > 0 ? 1 : 0,
+    };
+  }
+
+  // Handle an API response that already contains paginated data.
+  if (
+    result !== null &&
+    typeof result === "object" &&
+    Array.isArray((result as OrdersResponse).data)
+  ) {
+    return result as OrdersResponse;
+  }
+
+  throw new Error("Unexpected orders API response format");
 }
 
 /**
@@ -42,12 +70,13 @@ export async function getOrders(filters: OrdersFilter = {}): Promise<OrdersRespo
  */
 export async function getOrder(id: string): Promise<Order> {
   const { data } = await apiClient.get(`/api/admin/orders/${id}`);
+
   return unwrapApiResponse<Order>(data);
 }
 
 /**
  * PATCH /orders/:id/status
- * Update the status of an order (e.g. confirm, start preparing, mark delivered).
+ * Update an order's status.
  */
 export async function updateOrderStatus(
   id: string,
@@ -57,13 +86,13 @@ export async function updateOrderStatus(
     newStatus: ORDER_STATUS_TO_API[payload.status],
     note: payload.notes,
   });
+
   return unwrapApiResponse<Order>(data);
 }
 
 /**
  * POST /orders/:id/alternative
- * Pharmacist confirms alternative products for unavailable items.
- * The order remains open for bidding and does not wait for customer-app confirmation.
+ * Propose alternative products for unavailable items.
  */
 export async function proposeAlternative(
   payload: ProposeAlternativeRequest,
@@ -76,12 +105,13 @@ export async function proposeAlternative(
       ),
     })),
   });
+
   return unwrapApiResponse<ProposeAlternativeResponse>(data);
 }
 
 /**
- * DELETE /orders/:id
- * Cancel / delete an order.
+ * POST /orders/:id/decline
+ * Cancel or decline an order.
  */
 export async function cancelOrder(id: string, reason?: string): Promise<void> {
   await apiClient.post(`/api/admin/bids/${id}/decline`, { reason });
