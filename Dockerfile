@@ -3,6 +3,8 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm install --no-audit --no-fund --legacy-peer-deps
 COPY . .
+ARG VITE_API_BASE_URL=https://capsula.prognil.com
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 RUN npm run build
 
 FROM node:22-slim
