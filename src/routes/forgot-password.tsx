@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import emailjs from "@emailjs/browser";
+import { AuthAPI } from "@/api";
 import capsuleLogo from "@/assets/capsule-logo.png";
 import authBg from "@/assets/auth-bg.png";
 
@@ -8,97 +8,24 @@ export const Route = createFileRoute("/forgot-password")({
   component: ForgotPasswordPage,
 });
 
-const SERVICE_ID = import.meta.env.VITE_EMAILJS_SERVICE_ID ?? "";
-const TEMPLATE_ID = import.meta.env.VITE_EMAILJS_TEMPLATE_ID ?? "";
-const PUBLIC_KEY = import.meta.env.VITE_EMAILJS_PUBLIC_KEY ?? "";
-
-function buildEmailHtml(resetLink: string): string {
-  return `
-<!DOCTYPE html>
-<html dir="rtl" lang="ar">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <style>
-    body { margin:0; padding:0; background:#f4f4f4; font-family: 'Segoe UI', Tahoma, Arial, sans-serif; direction:rtl; }
-    .wrapper { max-width:600px; margin:40px auto; background:#fff; border-radius:12px; overflow:hidden; box-shadow:0 2px 12px rgba(0,0,0,.08); }
-    .logo-area { padding:32px 40px 24px; text-align:center; border-bottom:1px solid #f0f0f0; }
-    .logo-area img { height:64px; }
-    .body { padding:36px 40px; text-align:right; color:#1a1a1a; font-size:15px; line-height:1.8; }
-    h2 { margin:0 0 24px; font-size:20px; font-weight:700; color:#1a1a1a; }
-    .btn-wrap { text-align:center; margin:28px 0; }
-    .btn { display:inline-block; background:#3d7a5e; color:#fff !important; text-decoration:none; padding:14px 36px; border-radius:8px; font-size:15px; font-weight:600; letter-spacing:.3px; }
-    ul { padding-right:24px; margin:8px 0 20px; }
-    ul li { margin-bottom:6px; }
-    .footer { padding:24px 40px; border-top:1px solid #f0f0f0; color:#666; font-size:13px; text-align:right; line-height:1.7; }
-    .note { color:#888; font-size:13px; margin-top:20px; }
-  </style>
-</head>
-<body>
-  <div class="wrapper">
-    <div class="logo-area">
-      <div style="font-size:28px; font-weight:300; color:#3d7a5e;">Capsula &nbsp;·&nbsp; كبسولة</div>
-    </div>
-    <div class="body">
-      <h2>إعادة تعيين كلمة المرور لحسابك في كبسولة</h2>
-      <p>مرحباً 👋،</p>
-      <p>لقد طلبت إعادة تعيين كلمة المرور لحسابك في كبسولة.</p>
-      <p>لإتمام العملية، يرجى الضغط على الزر أدناه لتعيين كلمة مرور جديدة:</p>
-      <div class="btn-wrap">
-        <a href="${resetLink}" class="btn">إعادة تعيين كلمة المرور</a>
-      </div>
-      <p>سيتم تحويلك إلى صفحة أمنة تحتوي على الحقول التالية:</p>
-      <ul>
-        <li>كلمة المرور الجديدة</li>
-        <li>تأكيد كلمة المرور الجديدة</li>
-      </ul>
-      <p class="note">رابط إعادة التعيين صالح لمدة ساعة واحدة فقط من وقت استلام هذا البريد.</p>
-      <p class="note">إذا لم تكن أنت من طلب إعادة التعيين، يمكنك تجاهل هذا البريد بأمان.</p>
-    </div>
-    <div class="footer">
-      <p>شكرًا لاستخدامك كبسولة،<br/>🍀 فريق الدعم في كبسولة</p>
-      <div style="text-align:center; margin-top:16px;">
-        <a href="${resetLink}" style="display:inline-block; background:#3d7a5e; color:#fff; text-decoration:none; padding:12px 32px; border-radius:8px; font-size:14px; font-weight:600;">إعادة تعيين كلمة المرور</a>
-      </div>
-    </div>
-  </div>
-</body>
-</html>`;
-}
-
 function ForgotPasswordPage() {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState("");
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
     setSendError("");
-    if (!email.trim()) return;
-
-    const resetLink = `${window.location.origin}/reset-password`;
-
-    if (!SERVICE_ID || !TEMPLATE_ID || !PUBLIC_KEY) {
-      navigate({ to: "/email-sent", search: { email } });
-      return;
-    }
+    const normalizedEmail = email.trim();
+    if (!normalizedEmail) return;
 
     setSending(true);
     try {
-      await emailjs.send(
-        SERVICE_ID,
-        TEMPLATE_ID,
-        {
-          to_email: email,
-          reset_link: resetLink,
-          message_html: buildEmailHtml(resetLink),
-        },
-        PUBLIC_KEY,
-      );
-      navigate({ to: "/email-sent", search: { email } });
-    } catch {
-      setSendError("حدث خطأ أثناء إرسال البريد. يرجى المحاولة مرة أخرى.");
+      await AuthAPI.forgotPassword({ email: normalizedEmail });
+      navigate({ to: "/reset-password", search: { email: normalizedEmail } });
+    } catch (error) {
+      setSendError(error instanceof Error ? error.message : "تعذر إرسال رمز التحقق. يرجى المحاولة مرة أخرى.");
     } finally {
       setSending(false);
     }
@@ -128,21 +55,23 @@ function ForgotPasswordPage() {
         <form onSubmit={handleSubmit} className="w-full max-w-md space-y-6 text-right">
           <div className="space-y-2">
             <h1 className="text-2xl font-bold text-foreground">نسيت كلمة المرور</h1>
-            <p className="text-sm text-muted-foreground">إعادة تعيين كلمة المرور لحسابك في كبسولة</p>
+            <p className="text-sm text-muted-foreground">سنرسل رمز تحقق إلى بريدك الإلكتروني لإعادة تعيين كلمة المرور.</p>
           </div>
 
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="البريد الإلكتروني"
-            required
-            className="w-full h-12 rounded-full border border-border bg-background px-5 text-sm text-right placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-          />
+          <label className="block space-y-2">
+            <span className="text-sm font-medium">البريد الإلكتروني</span>
+            <input
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="البريد الإلكتروني"
+              required
+              className="w-full h-12 rounded-full border border-border bg-background px-5 text-sm text-right placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
+          </label>
 
-          {sendError && (
-            <p className="text-sm text-destructive">{sendError}</p>
-          )}
+          {sendError && <p role="alert" className="text-sm text-destructive">{sendError}</p>}
 
           <button
             type="submit"
@@ -154,9 +83,7 @@ function ForgotPasswordPage() {
                 <span className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
                 جارٍ الإرسال...
               </>
-            ) : (
-              "إرسال رابط إعادة التعيين"
-            )}
+            ) : "إرسال رمز التحقق"}
           </button>
         </form>
       </div>
