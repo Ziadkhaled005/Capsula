@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { Clock3, TriangleAlert } from "lucide-react";
 import type { Order, OrderItem } from "@/routes/pharmacy.orders";
 import type { InventoryItem } from "@/types";
@@ -12,6 +12,7 @@ import panadolNight from "../../attached_assets/offer-panadol-night.png";
 export type OfferSubmissionPayload = {
   discountPercent: number;
   discountRemoved?: boolean;
+  preparationTime?: number;
   deliveryTime: number;
   deliveryFee: number;
   freeDelivery: boolean;
@@ -47,6 +48,7 @@ function filterNumericInput(value: string, allowDecimal = false) {
   const normalized = value
     .replace(/[٠-٩]/g, (digit) => String(digit.charCodeAt(0) - 0x0660))
     .replace(/[۰-۹]/g, (digit) => String(digit.charCodeAt(0) - 0x06f0));
+
   const filtered = normalized
     .replace(/[٫,]/g, ".")
     .replace(allowDecimal ? /[^0-9.]/g : /[^0-9]/g, "");
@@ -54,6 +56,7 @@ function filterNumericInput(value: string, allowDecimal = false) {
   if (!allowDecimal) return filtered;
 
   const [integerPart, ...decimalParts] = filtered.split(".");
+
   return decimalParts.length ? `${integerPart}.${decimalParts.join("")}` : integerPart;
 }
 
@@ -66,10 +69,12 @@ function ProductRow({ product }: { product: OrderItem }) {
         aria-hidden="true"
         className="h-11 w-11 shrink-0 rounded-md border border-[#e5e8e6] object-cover"
       />
+
       <div className="min-w-0 flex-1">
         <p className="truncate text-[13px] font-medium text-[#363b3a]">{product.name}</p>
         <p className="mt-0.5 text-[11px] text-[#858b88]">الكمية: {product.qty} شريط</p>
       </div>
+
       <span dir="ltr" className="shrink-0 text-xs text-[#606663]">
         {money(product.price)} ج.م
       </span>
@@ -77,7 +82,7 @@ function ProductRow({ product }: { product: OrderItem }) {
   );
 }
 
-function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
+function DetailRow({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="flex items-start justify-between gap-3 text-[13px] leading-5">
       <span className="shrink-0 text-[#656b68]">{label}:</span>
@@ -95,6 +100,7 @@ export function OfferSubmissionForm({
   onSubmit,
 }: OfferSubmissionFormProps) {
   const [discountPercent, setDiscountPercent] = useState("");
+  const [preparationTime, setPreparationTime] = useState("");
   const [deliveryTime, setDeliveryTime] = useState("");
   const [deliveryFee, setDeliveryFee] = useState("");
   const [freeDelivery, setFreeDelivery] = useState(false);
@@ -103,12 +109,16 @@ export function OfferSubmissionForm({
   const [missingAlternativeNames, setMissingAlternativeNames] = useState<string[]>([]);
   const [requestedProduct, setRequestedProduct] = useState<OrderItem | null>(null);
   const [withdrawConfirmationOpen, setWithdrawConfirmationOpen] = useState(false);
+
   const discountExceedsLimit = Number(discountPercent) > MAX_DISCOUNT_PERCENT;
 
   useEffect(() => {
     if (!initialPayload) return;
 
     setDiscountPercent(String(initialPayload.discountPercent));
+    setPreparationTime(
+      initialPayload.preparationTime == null ? "" : String(initialPayload.preparationTime),
+    );
     setDeliveryTime(String(initialPayload.deliveryTime));
     setDeliveryFee(String(initialPayload.deliveryFee));
     setFreeDelivery(initialPayload.freeDelivery);
@@ -118,12 +128,15 @@ export function OfferSubmissionForm({
   }, [initialPayload]);
 
   const availableProducts = (order.products ?? []).filter((product) => product.available !== false);
+
   const unavailableProducts = (order.products ?? []).filter(
     (product) => product.available === false,
   );
+
   const offerInputClassName = isEditing
     ? "h-9 w-full rounded-[9px] border border-[#628173] bg-white px-3 text-[13px] outline-none transition focus:border-[#285849] focus:ring-2 focus:ring-[#285849]/10"
     : "h-[42px] w-full rounded-xl border border-[#e2e6e3] bg-white px-3 text-sm outline-none transition focus:border-[#6e9b84] focus:ring-2 focus:ring-[#6e9b84]/15";
+
   const discountInputClassName = isEditing
     ? discountExceedsLimit
       ? "h-9 w-full rounded-[9px] border border-[#f04444] bg-white px-3 text-[13px] outline-none transition focus:border-[#f04444] focus:ring-2 focus:ring-[#f04444]/10"
@@ -131,6 +144,7 @@ export function OfferSubmissionForm({
     : discountExceedsLimit
       ? "h-[42px] w-full rounded-xl border border-[#f04444] bg-white px-3 text-sm outline-none transition focus:border-[#f04444] focus:ring-2 focus:ring-[#f04444]/15"
       : offerInputClassName;
+
   const discountedPrice = useMemo(() => {
     const discount = Number(discountPercent) || 0;
     return Math.max(0, order.price - (order.price * discount) / 100);
@@ -138,15 +152,23 @@ export function OfferSubmissionForm({
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+
     const missingAlternatives = unavailableProducts.filter(
       (product) => !alternatives[product.name]?.length,
     );
+
+    const preparationMinutes = Number(preparationTime);
     const deliveryMinutes = Number(deliveryTime);
     const deliveryFeeAmount = Number(deliveryFee);
 
     setMissingAlternativeNames(missingAlternatives.map((product) => product.name));
+
     if (
       discountExceedsLimit ||
+      preparationTime.trim() === "" ||
+      !Number.isFinite(preparationMinutes) ||
+      preparationMinutes < 1 ||
+      deliveryTime.trim() === "" ||
       !Number.isFinite(deliveryMinutes) ||
       deliveryMinutes < 1 ||
       (!freeDelivery &&
@@ -160,6 +182,7 @@ export function OfferSubmissionForm({
 
     onSubmit({
       discountPercent: Number(discountPercent) || 0,
+      preparationTime: preparationMinutes,
       deliveryTime: deliveryMinutes,
       deliveryFee: freeDelivery ? 0 : deliveryFeeAmount,
       freeDelivery,
@@ -184,6 +207,7 @@ export function OfferSubmissionForm({
           <h1 className="shrink-0 text-lg font-medium sm:text-2xl">
             {isEditing ? "تعديل العرض" : "تقديم عرض"}
           </h1>
+
           {isEditing ? (
             <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded-full bg-[#e8f2ed] px-2.5 py-1.5 text-[10px] font-medium text-[#4d7462]">
               عرض مقدم — في انتظار العميل
@@ -195,6 +219,7 @@ export function OfferSubmissionForm({
             </span>
           )}
         </div>
+
         <button
           type="button"
           onClick={onCancel}
@@ -239,6 +264,7 @@ export function OfferSubmissionForm({
                   </span>
                 </div>
               )}
+
               <h2 className={`text-lg font-bold text-[#353b38] ${isEditing ? "mb-4" : "mb-5"}`}>
                 {isEditing ? "تعديل العرض" : `تقديم العرض — طلب #${order.orderNo}`}
               </h2>
@@ -246,6 +272,7 @@ export function OfferSubmissionForm({
               <div className={isEditing ? "space-y-2" : "space-y-4"}>
                 <label className="block text-[13px] font-medium">
                   <span className={`${isEditing ? "mb-1" : "mb-2"} block`}>نسبة الخصم (%)</span>
+
                   <input
                     id="discount-percent"
                     data-testid="input-discount-percent"
@@ -264,6 +291,7 @@ export function OfferSubmissionForm({
                     }
                     className={discountInputClassName}
                   />
+
                   <span
                     id="discount-limit-note"
                     data-testid="text-discount-limit"
@@ -279,10 +307,36 @@ export function OfferSubmissionForm({
                   </span>
                 </label>
 
+                {/* Preparation time — required by the backend offer request */}
+                <label className="block text-[13px] font-medium">
+                  <span className={`${isEditing ? "mb-1" : "mb-2"} block`}>
+                    وقت التجهيز (بالدقائق)
+                  </span>
+
+                  <input
+                    id="preparation-time"
+                    data-testid="input-preparation-time"
+                    type="text"
+                    required
+                    inputMode="numeric"
+                    value={preparationTime}
+                    onChange={(event) => setPreparationTime(filterNumericInput(event.target.value))}
+                    placeholder="مثال: 15"
+                    className={offerInputClassName}
+                  />
+
+                  {!isEditing && (
+                    <span className="mt-1.5 block text-[11px] font-normal text-[#777e7a]">
+                      أدخل الوقت المتوقع لتجهيز الطلب قبل التوصيل
+                    </span>
+                  )}
+                </label>
+
                 <label className="block text-[13px] font-medium">
                   <span className={`${isEditing ? "mb-1" : "mb-2"} block`}>
                     وقت التوصيل (بالدقائق)
                   </span>
+
                   <input
                     type="text"
                     required
@@ -292,6 +346,7 @@ export function OfferSubmissionForm({
                     placeholder="مثال: 30"
                     className={offerInputClassName}
                   />
+
                   {!isEditing && (
                     <span className="mt-1.5 block text-[11px] font-normal text-[#777e7a]">
                       التزم بوقت واقعي لتجنب التقييم السلبي
@@ -301,6 +356,7 @@ export function OfferSubmissionForm({
 
                 <label className="block text-[13px] font-medium">
                   <span className={`${isEditing ? "mb-1" : "mb-2"} block`}>رسوم التوصيل (ج.م)</span>
+
                   <input
                     type="text"
                     required={!freeDelivery}
@@ -317,6 +373,7 @@ export function OfferSubmissionForm({
 
                 <div className="flex items-center gap-3 text-[13px]">
                   <span>توصيل مجاني</span>
+
                   <button
                     type="button"
                     role="switch"
@@ -337,6 +394,7 @@ export function OfferSubmissionForm({
 
                 <label className="block text-[13px] font-medium">
                   <span className={`${isEditing ? "mb-1" : "mb-2"} block`}>ملاحظات (اختياري)</span>
+
                   <input
                     type="text"
                     value={notes}
@@ -349,6 +407,7 @@ export function OfferSubmissionForm({
                 {!isEditing && (
                   <div className="flex min-h-[58px] items-center justify-between rounded-xl bg-[#e1eee7] px-4 text-sm">
                     <span className="font-medium">السعر بعد الخصم:</span>
+
                     <strong dir="ltr" className="text-base font-bold text-[#16831b]">
                       {money(discountedPrice)} ج.م
                     </strong>
@@ -357,12 +416,14 @@ export function OfferSubmissionForm({
               </div>
             </div>
 
-            <aside className="min-w-0 lg:pt-1 ml-[10px] mr-[0px] pl-[0px] pr-[0px]">
+            <aside className="ml-[10px] mr-[0px] min-w-0 pl-[0px] pr-[0px] lg:pt-1">
               {isEditing ? (
                 <>
                   <h3 className="mb-5 text-center text-[15px] font-medium">العرض الحالي</h3>
+
                   <div className="space-y-2">
                     <DetailRow label="نسبة الخصم" value={`${discountPercent || 0}%`} />
+
                     <DetailRow
                       label="السعر بعد الخصم"
                       value={
@@ -371,7 +432,11 @@ export function OfferSubmissionForm({
                         </span>
                       }
                     />
+
+                    <DetailRow label="وقت التجهيز" value={`${preparationTime || 0} دقيقة`} />
+
                     <DetailRow label="وقت التوصيل" value={`${deliveryTime || 0} دقيقة`} />
+
                     <DetailRow
                       label="رسوم التوصيل"
                       value={
@@ -382,31 +447,40 @@ export function OfferSubmissionForm({
                         )
                       }
                     />
+
                     <DetailRow
                       label="تاريخ التقديم"
                       value={`اليوم ${order.time.replace(/^0/, "")}`}
                     />
                   </div>
+
                   <div className="mt-0 rounded-[10px] border border-[#f0ddc8] bg-[#fff6eb] px-3.5 py-2 text-[10px] leading-[1.6] text-[#66605a]">
                     <h4 className="mb-1 flex items-center gap-1.5 font-semibold text-[#df8a17]">
                       <TriangleAlert className="h-3.5 w-3.5" aria-hidden="true" />
                       تنبيه
                     </h4>
+
                     <p>سحب العرض بشكل متكرر يؤثر على تقييم الصيدلية وسمعتها لدى العميل.</p>
                   </div>
                 </>
               ) : (
                 <>
                   <h3 className="mb-4 text-center text-base font-medium">تفاصيل الطلب</h3>
+
                   <div className="space-y-2.5 border-b border-[#eceeec] pb-4">
                     <DetailRow label="اسم العميل" value={order.customer} />
+
                     <DetailRow label="رقم الطلب" value={`#${order.orderNo}`} />
+
                     <DetailRow label="عدد المنتجات" value={`${order.items} منتجات`} />
+
                     <DetailRow
                       label="طريقة الدفع"
                       value={order.payment === "cash" ? "نقد" : "بطاقة ائتمان"}
                     />
+
                     <DetailRow label="العنوان" value={order.address} />
+
                     <DetailRow
                       label="المبلغ الأصلي"
                       value={<span dir="ltr">{money(order.price)} ج.م</span>}
@@ -415,6 +489,7 @@ export function OfferSubmissionForm({
 
                   <section className="pt-4">
                     <h3 className="mb-3 text-center text-sm font-medium">المنتجات المطلوبة</h3>
+
                     <div className="space-y-2.5">
                       {availableProducts.map((product) => (
                         <ProductRow key={product.name} product={product} />
@@ -430,9 +505,11 @@ export function OfferSubmissionForm({
                           {unavailableProducts.length}
                         </span>
                       </h3>
+
                       <p className="mb-2 text-[11px] leading-4 text-[#89908c]">
                         اختر بديلاً لكل منتج غير متوفر قبل الإرسال
                       </p>
+
                       {missingAlternativeNames.length > 0 && (
                         <p
                           role="alert"
@@ -441,6 +518,7 @@ export function OfferSubmissionForm({
                           يرجى اختيار بديل لكل منتج غير متوفر قبل إرسال العرض.
                         </p>
                       )}
+
                       <div className="space-y-2">
                         {unavailableProducts.map((product) => (
                           <div key={product.name} className="space-y-2">
@@ -451,15 +529,19 @@ export function OfferSubmissionForm({
                                 aria-hidden="true"
                                 className="h-10 w-10 shrink-0 rounded-md border border-[#e5e8e6] object-cover"
                               />
+
                               <div className="min-w-0 flex-1">
                                 <p className="truncate text-xs font-medium">{product.name}</p>
+
                                 <p className="mt-0.5 text-[10px] text-[#89908c]">
                                   الكمية: {product.qty} شريط
                                 </p>
                               </div>
+
                               <span className="rounded-md bg-[#fff2e8] px-1.5 py-1 text-[10px] text-[#e87512]">
                                 غير متوفر
                               </span>
+
                               <button
                                 type="button"
                                 onClick={() => setRequestedProduct(product)}
@@ -468,9 +550,11 @@ export function OfferSubmissionForm({
                                 {alternatives[product.name]?.length ? "تغيير البديل" : "تقديم بديل"}
                               </button>
                             </div>
+
                             {alternatives[product.name]?.length > 0 && (
                               <div className="rounded-lg border border-[#d6e7dd] bg-[#f0f7f3] px-3 py-2 text-xs">
                                 <span className="text-[#68766e]">البدائل المختارة: </span>
+
                                 <span className="font-medium text-[#285849]">
                                   {alternatives[product.name]
                                     .map((alternative) => alternative.name)
@@ -503,6 +587,7 @@ export function OfferSubmissionForm({
             >
               {isEditing ? "تحديث العرض" : "تقديم العرض"}
             </button>
+
             {isEditing ? (
               <button
                 type="button"
@@ -523,6 +608,7 @@ export function OfferSubmissionForm({
           </div>
         </div>
       </form>
+
       <Dialog open={withdrawConfirmationOpen} onOpenChange={setWithdrawConfirmationOpen}>
         <DialogContent
           dir="rtl"
@@ -536,6 +622,7 @@ export function OfferSubmissionForm({
             <DialogTitle className="text-[22px] font-normal leading-8">
               هل أنت متأكد من سحب العرض؟
             </DialogTitle>
+
             <DialogDescription
               id="withdraw-offer-description"
               className="mt-5 text-right text-[15px] leading-6 text-[#373d39]"
@@ -543,6 +630,7 @@ export function OfferSubmissionForm({
               سحب العرض بشكل متكرر سيؤثر سلباً على تقييم صيدليتك. هذا الإجراء لا يمكن التراجع عنه.
             </DialogDescription>
           </div>
+
           <div
             dir="ltr"
             className="flex h-[52px] shrink-0 items-center justify-start gap-3 border-t border-[#dedfdf] px-4"
@@ -557,6 +645,7 @@ export function OfferSubmissionForm({
             >
               نعم، اسحب العرض
             </button>
+
             <button
               type="button"
               onClick={() => setWithdrawConfirmationOpen(false)}
@@ -567,6 +656,7 @@ export function OfferSubmissionForm({
           </div>
         </DialogContent>
       </Dialog>
+
       {requestedProduct && (
         <InventoryAlternativePicker
           requestedProduct={requestedProduct}
@@ -576,9 +666,11 @@ export function OfferSubmissionForm({
               ...current,
               [requestedProduct.name]: selectedAlternatives,
             }));
+
             setMissingAlternativeNames((current) =>
               current.filter((name) => name !== requestedProduct.name),
             );
+
             setRequestedProduct(null);
           }}
         />

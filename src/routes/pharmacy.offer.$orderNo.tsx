@@ -3,7 +3,9 @@ import { useState } from "react";
 import { ArrowRight, CircleAlert, LoaderCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { OfferSubmissionForm, type OfferSubmissionPayload } from "@/components/OfferSubmissionForm";
-import { useOrders, useProposeAlternative } from "@/hooks/useOrders";
+import { useOrders, useSubmitOffer } from "@/hooks/useOrders";
+import { useBidDetail } from "@/hooks/useBids";
+import type { SubmitOfferRequest } from "@/types";
 import { mapOrder } from "./pharmacy.orders";
 
 export const Route = createFileRoute("/pharmacy/offer/$orderNo")({
@@ -18,42 +20,86 @@ function OfferPage() {
   const { orderNo } = Route.useParams();
   const { editOffer } = Route.useSearch();
   const navigate = useNavigate();
+
   const [submitError, setSubmitError] = useState("");
+
   const ordersQuery = useOrders({ search: orderNo, pageSize: 100 });
-  const proposeAlternative = useProposeAlternative();
   const apiOrder = ordersQuery.data?.data.find((candidate) => candidate.orderNo === orderNo);
   const order = apiOrder ? mapOrder(apiOrder) : null;
 
+  // The bid detail contains item IDs required by unavailableItems.
+  const bidDetailQuery = useBidDetail(apiOrder?.id ?? "");
+  const submitOffer = useSubmitOffer();
+
   const goBack = () => navigate({ to: "/pharmacy/orders" });
-  const handleSubmit = async (payload: OfferSubmissionPayload) => {
-    if (!order || !apiOrder) return;
+
+  const handleSubmit = async (form: OfferSubmissionPayload) => {
+    if (!apiOrder || !order) {
+      setSubmitError("بيانات الطلب غير مكتملة. يرجى إعادة تحميل الصفحة.");
+      return;
+    }
+
+    if (!bidDetailQuery.data) {
+      setSubmitError("تعذر تحميل تفاصيل الطلب اللازمة لإرسال العرض.");
+      return;
+    }
+
     setSubmitError("");
+
     try {
-      const proposals = Object.entries(payload.alternatives).map(([productName, alternatives]) => {
-        const product = order.products.find((candidate) => candidate.name === productName);
-        if (!product || !product.productId.trim() || !Number.isFinite(Number(product.productId))) {
-          throw new Error("يتعذر إرسال البدائل: معرّف المنتج الأصلي غير متوافق مع عقد API الحالي.");
-        }
-        const mappedAlternatives = alternatives.map((alternative) => {
-          if (!alternative.id.trim() || !Number.isFinite(Number(alternative.id))) {
-            throw new Error("يتعذر إرسال البدائل: معرّف منتج المخزون غير متوافق مع عقد API الحالي.");
+      const bidItems = bidDetailQuery.data.items ?? [];
+
+      const unavailableItems: SubmitOfferRequest["unavailableItems"] = order.products
+        .filter((product) => product.available === false)
+        .map((product) => {
+          const originalItem = bidItems.find(
+            (item) => String(item.productName ?? "").trim() === product.name.trim(),
+          );
+
+          if (!originalItem || !Number.isInteger(Number(originalItem.id))) {
+            throw new Error(`تعذر تحديد معرّف المنتج المطلوب: ${product.name}`);
           }
-          return { productId: alternative.id, qty: product.qty };
+
+          const alternatives = form.alternatives[product.name] ?? [];
+
+          if (alternatives.length === 0) {
+            throw new Error(`يرجى اختيار بديل للمنتج غير المتوفر: ${product.name}`);
+          }
+
+          const alternativeProductIds = alternatives.map((alternative) => {
+            const id = Number(alternative.id);
+
+            if (!Number.isInteger(id) || id <= 0) {
+              throw new Error(`معرّف المنتج البديل غير صالح: ${alternative.name}`);
+            }
+
+            return id;
+          });
+
+          return {
+            orderItemId: Number(originalItem.id),
+            alternativeProductIds,
+          };
         });
-        return { originalProductId: product.productId, alternatives: mappedAlternatives };
+
+      const payload: SubmitOfferRequest = {
+        discountPercentage: form.discountPercent,
+        preparationMinutes: form.preparationTime,
+        deliveryMinutes: form.deliveryTime,
+        deliveryFee: form.freeDelivery ? 0 : form.deliveryFee,
+        notes: form.notes || null,
+        unavailableItems,
+      };
+
+      await submitOffer.mutateAsync({
+        orderId: String(apiOrder.id),
+        payload,
       });
 
-      const result = await proposeAlternative.mutateAsync({
-        orderId: apiOrder.id,
-        proposals,
-      });
-      if (!result.success) {
-        throw new Error("لم يؤكد الخادم إرسال اقتراح البدائل.");
-      }
       goBack();
     } catch (error) {
       setSubmitError(
-        error instanceof Error ? error.message : "تعذر إرسال اقتراح البدائل. يرجى المحاولة مجدداً.",
+        error instanceof Error ? error.message : "تعذر إرسال العرض. يرجى المحاولة مرة أخرى.",
       );
     }
   };
@@ -61,7 +107,10 @@ function OfferPage() {
   if (ordersQuery.isLoading) {
     return (
       <section dir="rtl" className="grid min-h-[60vh] place-items-center text-muted-foreground">
-        <span className="inline-flex items-center gap-2"><LoaderCircle className="h-4 w-4 animate-spin" /> جارٍ تحميل الطلب...</span>
+        <span className="inline-flex items-center gap-2">
+          <LoaderCircle className="h-4 w-4 animate-spin" />
+          جارٍ تحميل الطلب...
+        </span>
       </section>
     );
   }
@@ -69,10 +118,15 @@ function OfferPage() {
   if (ordersQuery.isError) {
     return (
       <section dir="rtl" className="grid min-h-[60vh] place-items-center">
-        <div role="alert" className="max-w-md rounded-2xl border border-border bg-card p-8 text-center">
+        <div
+          role="alert"
+          className="max-w-md rounded-2xl border border-border bg-card p-8 text-center"
+        >
           <CircleAlert className="mx-auto h-8 w-8 text-destructive" aria-hidden="true" />
           <p className="mt-4 text-sm text-muted-foreground">تعذر تحميل الطلب من الخادم.</p>
-          <Button type="button" onClick={() => void ordersQuery.refetch()} className="mt-5">إعادة المحاولة</Button>
+          <Button type="button" onClick={() => void ordersQuery.refetch()} className="mt-5">
+            إعادة المحاولة
+          </Button>
         </div>
       </section>
     );
@@ -84,11 +138,11 @@ function OfferPage() {
         <div className="max-w-md rounded-2xl border border-border bg-card p-8 text-center shadow-sm">
           <CircleAlert className="mx-auto h-8 w-8 text-muted-foreground" aria-hidden="true" />
           <h1 className="mt-4 text-lg font-bold text-foreground">
-            {editOffer ? "تعديل العرض غير متاح" : "الطلب غير متاح لاقتراح بدائل"}
+            {editOffer ? "تعديل العرض غير متاح" : "الطلب غير متاح لتقديم عرض"}
           </h1>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
             {editOffer
-              ? "لا يوجد endpoint لقراءة أو تعديل عرض سابق."
+              ? "تعديل العرض السابق يحتاج إلى تحميل بيانات العرض الحالي."
               : "قد يكون الطلب مغلقاً أو لا يوجد طلب مطابق."}
           </p>
           <Button type="button" onClick={goBack} className="mt-5 gap-2">
@@ -102,10 +156,12 @@ function OfferPage() {
 
   return (
     <>
-      <div role="note" className="mx-auto mb-3 max-w-[1400px] rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-right text-sm text-amber-900">
-        endpoint الحالي يرسل بدائل المنتجات فقط. الخصم ووقت/رسوم التوصيل والملاحظات لا تدخل في طلب API ولن تُحفظ. يلزم endpoint خلفي موثق لدعم هذه الحقول.
-      </div>
-      {submitError && <p role="alert" className="mx-auto mb-3 max-w-[1400px] text-right text-sm text-destructive">{submitError}</p>}
+      {submitError && (
+        <p role="alert" className="mx-auto mb-3 max-w-[1400px] text-right text-sm text-destructive">
+          {submitError}
+        </p>
+      )}
+
       <OfferSubmissionForm
         order={order}
         onCancel={goBack}
