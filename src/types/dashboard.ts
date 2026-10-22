@@ -40,3 +40,21 @@ export interface Pharmacy {
   isAcceptingOrders: boolean;
   createdAt: string;
 }
+
+export interface SuperAdminDashboardResponse {
+  pendingInventoryRequests: number;
+  rejectedOrders: number;
+  activeOrders: number;
+  recentActivities: Array<{
+    requestId: number | string;
+    pharmacyId: number | string;
+    pharmacyName: string;
+    activityType: string;
+    status: string;
+    date: string;
+  }>;
+  page?: number;
+  pageSize?: number;
+  totalCount?: number;
+  totalPages?: number;
+}

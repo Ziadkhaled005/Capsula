@@ -3,67 +3,55 @@ import type {
   User,
   LoginRequest,
   LoginResponse,
-  RefreshTokenResponse,
   ForgotPasswordRequest,
   ResetPasswordRequest,
   ChangePasswordRequest,
 } from "@/types";
 
-type BackendUser = Omit<Partial<User>, "role"> & {
-  role?: string;
-  roles?: string[];
-  userId?: string;
+type BackendUser = Partial<User> & {
+  id?: string | number;
+  userId?: string | number;
   userName?: string;
   fullName?: string;
   firstName?: string;
   lastName?: string;
   phoneNumber?: string;
-};
-
-type BackendLoginResponse = {
-  user?: BackendUser;
-  userId?: string;
-  userName?: string;
-  fullName?: string;
-  firstName?: string;
-  lastName?: string;
-  email?: string;
   role?: string;
   roles?: string[];
+};
+
+type BackendLoginResponse = BackendUser & {
+  user?: BackendUser;
   token?: string;
-  jwtToken?: string;
   accessToken?: string;
+  jwtToken?: string;
   access_token?: string;
   refreshToken?: string;
   refresh_token?: string;
   expiresIn?: number;
-  isSuccess?: boolean;
-  successMessage?: string;
-  errors?: unknown[];
 };
 
 function normalizeRole(user: BackendUser): User["role"] {
-  const roles = user.roles ?? (user.role ? [user.role] : []);
+  const roles = (user.roles ?? (user.role ? [user.role] : []))
+    .map((role) => role.trim().toLowerCase());
 
-  const normalizedRoles = roles.map((role) => role.trim().toLowerCase());
-
-  // SuperAdmin is an administrative role in this backend.
-  if (normalizedRoles.includes("superadmin") || normalizedRoles.includes("admin")) {
-    return "admin";
-  }
-
-  if (normalizedRoles.includes("pharmacist")) {
-    return "pharmacist";
-  }
-
-  throw new Error("Invalid or unsupported user role");
+  if (roles.includes("superadmin") || roles.includes("admin")) return "admin";
+  if (roles.includes("pharmacist")) return "pharmacist";
+  throw new Error("الحساب لا يملك صلاحية دخول لوحة التحكم.");
 }
 
-function normalizeUser(user: BackendUser, email: string): User {
+function normalizeUser(user: BackendUser, fallbackEmail: string): User {
+  const name =
+    user.fullName ||
+    user.name ||
+    user.userName ||
+    [user.firstName, user.lastName].filter(Boolean).join(" ") ||
+    fallbackEmail;
+
   return {
     id: String(user.id ?? user.userId ?? ""),
-    name: user.name ?? user.fullName ?? user.userName ?? email,
-    email: user.email ?? email,
+    name,
+    email: user.email ?? fallbackEmail,
     role: normalizeRole(user),
     pharmacyId: user.pharmacyId,
     pharmacyName: user.pharmacyName,
@@ -71,86 +59,52 @@ function normalizeUser(user: BackendUser, email: string): User {
   };
 }
 
-function normalizeLoginResponse(payload: unknown, email: string): LoginResponse {
-  const envelope = payload as {
-    isSuccess?: boolean;
-    successMessage?: string;
-  } | null;
-
-  if (envelope?.isSuccess === false) {
-    throw new Error(envelope.successMessage ?? "Login failed");
-  }
-
-  const response = unwrapApiResponse<BackendLoginResponse>(payload);
-
-  // The backend may return the user fields directly rather
-  // than nesting them inside a "user" property.
-  const backendUser = response.user ?? response;
-
+export async function login(payload: LoginRequest): Promise<LoginResponse> {
+  const { data } = await apiClient.post("/api/Auth/Login", payload);
+  const response = unwrapApiResponse<BackendLoginResponse>(data);
+  const user = normalizeUser(response.user ?? response, payload.email);
   const accessToken =
-    response.accessToken ?? response.token ?? response.jwtToken ?? response.access_token ?? "";
+    response.token ?? response.accessToken ?? response.jwtToken ?? response.access_token ?? "";
 
-  if (!accessToken.trim()) {
-    throw new Error("Login response does not contain an access token");
-  }
-
-  const user = normalizeUser(backendUser, email);
-
-  if (!user.id) {
-    throw new Error("Login response does not contain a user ID");
-  }
+  if (!accessToken.trim()) throw new Error("استجابة تسجيل الدخول لا تحتوي على رمز الدخول.");
+  if (!user.id) throw new Error("استجابة تسجيل الدخول لا تحتوي على معرّف المستخدم.");
 
   return {
     user,
     accessToken,
-    refreshToken: response.refreshToken ?? response.refresh_token ?? "",
-    expiresIn: response.expiresIn ?? 3600,
+    // The documented API does not issue refresh tokens. Keep this optional for old callers.
+    refreshToken: "",
+    expiresIn: response.expiresIn ?? 86400,
   };
 }
 
-/**
- * POST /api/Auth/Login
- */
-export async function login(payload: LoginRequest): Promise<LoginResponse> {
-  const { data } = await apiClient.post("/api/Auth/Login", payload);
-
-  return normalizeLoginResponse(data, payload.email);
+export async function getCurrentUser(): Promise<User> {
+  const { data } = await apiClient.get("/api/Auth/GetCurrentUser");
+  const response = unwrapApiResponse<BackendUser>(data);
+  const user = normalizeUser(response, response.email ?? "");
+  if (!user.id) throw new Error("استجابة المستخدم الحالي لا تحتوي على معرّف.");
+  return user;
 }
 
-/**
- * POST /api/Auth/Logout
- */
 export async function logout(): Promise<void> {
+  if (typeof window === "undefined") return;
   localStorage.removeItem("accessToken");
+  localStorage.removeItem("token");
   localStorage.removeItem("refreshToken");
+  localStorage.removeItem("user");
 }
 
-/**
- * POST /api/Auth/Refresh
- */
-export async function refreshToken(token: string): Promise<RefreshTokenResponse> {
-  const { data } = await apiClient.post("/api/Auth/Refresh", { refreshToken: token });
-
-  return unwrapApiResponse<RefreshTokenResponse>(data);
-}
-
-/**
- * POST /api/Auth/ForgotPassword
- */
 export async function forgotPassword(payload: ForgotPasswordRequest): Promise<void> {
-  await apiClient.post("/api/Auth/ForgotPassword", payload);
+  const { data } = await apiClient.post("/api/Auth/ForgotPassword", payload);
+  unwrapApiResponse<unknown>(data);
 }
 
-/**
- * POST /api/Auth/ResetPassword
- */
 export async function resetPassword(payload: ResetPasswordRequest): Promise<void> {
-  await apiClient.post("/api/Auth/ResetPassword", payload);
+  const { data } = await apiClient.post("/api/Auth/ResetPassword", payload);
+  unwrapApiResponse<unknown>(data);
 }
 
-/**
- * POST /api/Auth/ChangePassword
- */
 export async function changePassword(payload: ChangePasswordRequest): Promise<void> {
-  await apiClient.put("/api/Auth/ChangePassword", payload);
+  const { data } = await apiClient.put("/api/Auth/ChangePassword", payload);
+  unwrapApiResponse<unknown>(data);
 }

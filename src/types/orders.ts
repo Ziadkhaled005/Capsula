@@ -79,10 +79,7 @@ export interface ProposeAlternativeRequest {
   orderId: string;
   proposals: {
     originalProductId: string;
-    alternatives: {
-      productId: string;
-      qty: number;
-    }[];
+    alternatives: { productId: string; qty: number }[];
   }[];
 }
 
