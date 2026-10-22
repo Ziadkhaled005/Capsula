@@ -24,20 +24,32 @@ const STATUS_TO_API: Partial<Record<OrderStatus, string>> = {
 
 function statusFromApi(value: unknown): OrderStatus {
   switch (String(value ?? "").toLowerCase()) {
-    case "waitingforoffers": return "open-bidding";
-    case "pendingconfirmation": return "awaiting-customer-confirmation";
-    case "confirmed": return "confirmed";
-    case "onhold": return "on-hold";
-    case "inpreparation": return "preparing";
-    case "inroute": return "on-delivery";
-    case "delivered": return "delivered";
-    case "cancelled": return "cancelled";
-    default: return "awaiting-customer-confirmation";
+    case "waitingforoffers":
+      return "open-bidding";
+    case "pendingconfirmation":
+      return "awaiting-customer-confirmation";
+    case "confirmed":
+      return "confirmed";
+    case "onhold":
+      return "on-hold";
+    case "inpreparation":
+      return "preparing";
+    case "inroute":
+      return "on-delivery";
+    case "delivered":
+      return "delivered";
+    case "cancelled":
+      return "cancelled";
+    default:
+      return "awaiting-customer-confirmation";
   }
 }
 
-function paymentFromApi(value: unknown): "cash" | "card" {
-  return ["cash"].includes(String(value ?? "").toLowerCase()) ? "cash" : "card";
+function paymentFromApi(value: unknown): "cash" | "card" | "card-on-delivery" {
+  const v = String(value ?? "").toLowerCase();
+  if (v === "cash") return "cash";
+  if (v === "cardondelivery") return "card-on-delivery";
+  return "card";
 }
 
 function toIso(value: unknown): string {
@@ -64,7 +76,11 @@ function mapProduct(item: BackendOrder, index: number): OrderProduct {
 
 function mapBackendOrder(raw: BackendOrder): Order {
   const address = raw.deliveryAddress ?? {};
-  const items = Array.isArray(raw.items) ? raw.items : Array.isArray(raw.products) ? raw.products : [];
+  const items = Array.isArray(raw.items)
+    ? raw.items
+    : Array.isArray(raw.products)
+      ? raw.products
+      : [];
   const total = Number(raw.totalAmount ?? raw.total ?? raw.initialTotal ?? raw.subTotal ?? 0);
   const subtotal = Number(raw.subTotal ?? raw.subtotal ?? total);
   const discount = Number(raw.offerDiscount ?? raw.discount ?? 0);
@@ -75,11 +91,14 @@ function mapBackendOrder(raw: BackendOrder): Order {
       id: String(raw.customerId ?? ""),
       name: String(raw.customerName ?? raw.customer?.name ?? "عميل"),
       phone: String(raw.customerPhone ?? raw.customer?.phone ?? address.phoneNumber ?? ""),
-      address: [address.region, address.buildingName, address.street, raw.region]
-        .filter((part) => typeof part === "string" && part.trim())
-        .join("، ") || String(raw.address ?? raw.customer?.address ?? "—"),
-      addressDetail: [address.apartmentNumber, address.floorNumber, address.deliveryInstructions]
-        .filter(Boolean).join("، ") || undefined,
+      address:
+        [address.region, address.buildingName, address.street, raw.region]
+          .filter((part) => typeof part === "string" && part.trim())
+          .join("، ") || String(raw.address ?? raw.customer?.address ?? "—"),
+      addressDetail:
+        [address.apartmentNumber, address.floorNumber, address.deliveryInstructions]
+          .filter(Boolean)
+          .join("، ") || undefined,
     },
     products: items.map(mapProduct),
     status: statusFromApi(raw.status),
@@ -100,9 +119,7 @@ function mapBid(raw: BackendBid): Order {
   const estimatedSubtotal = Number(raw.estimatedSubTotal ?? raw.estimatedSubtotal ?? 0);
   const createdAt = toIso(raw.createdDate ?? raw.createdAt);
   const deadline = raw.offersDeadline ? new Date(toIso(raw.offersDeadline)).getTime() : 0;
-  const remainingMinutes = deadline > Date.now()
-    ? Math.ceil((deadline - Date.now()) / 60000)
-    : 0;
+  const remainingMinutes = deadline > Date.now() ? Math.ceil((deadline - Date.now()) / 60000) : 0;
 
   return {
     id: orderId,
@@ -140,9 +157,14 @@ function getArray(payload: unknown): BackendOrder[] {
 
 function matchesSearch(order: Order, search: string) {
   const term = search.trim().toLowerCase();
-  return !term || [
-    order.id, order.orderNo, order.customer.name, order.customer.phone,
-  ].some((part) => String(part ?? "").toLowerCase().includes(term));
+  return (
+    !term ||
+    [order.id, order.orderNo, order.customer.name, order.customer.phone].some((part) =>
+      String(part ?? "")
+        .toLowerCase()
+        .includes(term),
+    )
+  );
 }
 
 function paginate(orders: Order[], filters: OrdersFilter): OrdersResponse {
@@ -207,21 +229,22 @@ export async function updateOrderStatus(
   id: string,
   payload: UpdateOrderStatusRequest,
 ): Promise<Order> {
-  const apiStatus = payload.status === "awaiting-customer-confirmation"
-    ? "Confirmed"
-    : payload.status === "preparing"
-      ? "InPreparation"
-      : payload.status === "on-delivery"
-        ? "InRoute"
-        : payload.status === "on-hold"
-          ? "OnHold"
-          : payload.status === "cancelled"
-            ? "Cancelled"
-            : payload.status === "delivered"
-              ? "Delivered"
-              : payload.status === "confirmed"
-                ? "Confirmed"
-                : undefined;
+  const apiStatus =
+    payload.status === "awaiting-customer-confirmation"
+      ? "Confirmed"
+      : payload.status === "preparing"
+        ? "InPreparation"
+        : payload.status === "on-delivery"
+          ? "InRoute"
+          : payload.status === "on-hold"
+            ? "OnHold"
+            : payload.status === "cancelled"
+              ? "Cancelled"
+              : payload.status === "delivered"
+                ? "Delivered"
+                : payload.status === "confirmed"
+                  ? "Confirmed"
+                  : undefined;
 
   if (!apiStatus) throw new Error("لا يمكن تحديث حالة طلب المزايدة من شاشة الطلبات.");
 
@@ -241,10 +264,9 @@ export async function submitOffer(orderId: string, payload: SubmitOfferRequest) 
 }
 
 export async function declineBid(orderId: string, reason?: string) {
-  const { data } = await apiClient.post(
-    `/api/admin/bids/${encodeURIComponent(orderId)}/decline`,
-    { reason },
-  );
+  const { data } = await apiClient.post(`/api/admin/bids/${encodeURIComponent(orderId)}/decline`, {
+    reason,
+  });
   return unwrapApiResponse<unknown>(data);
 }
 
@@ -256,7 +278,6 @@ export async function getBidDetail(orderId: string): Promise<Record<string, any>
   const { data } = await apiClient.get(`/api/admin/bids/${encodeURIComponent(orderId)}`);
   return unwrapApiResponse<Record<string, any>>(data);
 }
-
 
 /** POST /api/admin/orders/items/{itemId}/alternatives (multipart form) */
 export async function proposeAlternative(itemId: string, formData: FormData) {

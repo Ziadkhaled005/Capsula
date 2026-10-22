@@ -20,12 +20,15 @@ function toItem(raw: BackendInventoryItem): InventoryItem {
     stockTotal: quantity,
     stockCurrent: quantity,
     price,
+    stripQuantity: raw.stripQuantity !== undefined ? Number(raw.stripQuantity) : undefined,
+    stripPrice: raw.stripPrice !== undefined ? Number(raw.stripPrice) : undefined,
     lastUpdated: String(raw.lastUpdated ?? raw.updatedAt ?? ""),
     imageUrl: raw.imageUrl ?? raw.productImageUrl ?? undefined,
     description: raw.description ?? undefined,
     barcode: raw.barcode ?? raw.code ?? undefined,
     expiryDate: raw.expiryDate ?? undefined,
     manufacturer: raw.manufacturer ?? undefined,
+    stockStatus: raw.status,
   };
 }
 
@@ -40,40 +43,54 @@ function getList(payload: unknown): BackendInventoryItem[] {
   throw new Error("استجابة المخزون من الخادم ليست بالقالب المتوقع.");
 }
 
-function stockStatus(raw: BackendInventoryItem): InventoryFilter["stockStatus"] {
-  const status = String(raw.status ?? "").toLowerCase();
-  if (status === "outofstock" || status === "out-of-stock") return "out-of-stock";
-  if (status === "low" || status === "low-stock") return "low-stock";
-  return "in-stock";
+const API_STATUS: Record<string, string> = {
+  "out-of-stock": "OutOfStock",
+  "low-stock": "Low",
+  "medium-stock": "Medium",
+  "in-stock": "Available",
+};
+
+function stockStatus(raw: BackendInventoryItem): InventoryItem["stockStatus"] {
+  return String(raw.status ?? "");
 }
 
 export async function getInventory(filters: InventoryFilter = {}): Promise<InventoryResponse> {
-  const params: Record<string, string | number> = {};
+  const page = Math.max(1, filters.page ?? 1);
+  const pageSize = Math.max(1, filters.pageSize ?? 20);
+
+  const params: Record<string, string | number> = { page, pageSize };
   if (filters.search?.trim()) params.search = filters.search.trim();
   if (filters.category?.trim()) {
     const categoryId = Number(filters.category);
     if (Number.isFinite(categoryId)) params.categoryId = categoryId;
   }
+  // Server-side status filter — Medium is its own bucket, not "Available".
   if (filters.stockStatus && filters.stockStatus !== "all") {
-    params.status = filters.stockStatus === "out-of-stock"
-      ? "OutOfStock"
-      : filters.stockStatus === "low-stock" ? "Low" : "Available";
+    params.status = API_STATUS[filters.stockStatus] ?? "Available";
   }
 
   const { data } = await apiClient.get("/api/admin/inventory", { params });
-  const rawItems = getList(data);
-  const allItems = rawItems.map(toItem);
-  const categories = [...new Set(rawItems.map((item) => String(item.categoryName ?? item.category ?? "")).filter(Boolean))];
-  const page = Math.max(1, filters.page ?? 1);
-  const pageSize = Math.max(1, filters.pageSize ?? 10);
-  const total = Number((unwrapApiResponse<any>(data) as any)?.totalCount ?? allItems.length);
+  const envelope = unwrapApiResponse<any>(data);
+  const rawItems: BackendInventoryItem[] = Array.isArray(envelope)
+    ? envelope
+    : Array.isArray(envelope?.items)
+      ? envelope.items
+      : [];
+  const total = Number(envelope?.totalCount ?? rawItems.length);
+  const totalPages = Number(envelope?.totalPages ?? Math.ceil(total / pageSize));
+
+  const categories = [
+    ...new Set(
+      rawItems.map((item) => String(item.categoryName ?? item.category ?? "")).filter(Boolean),
+    ),
+  ];
 
   return {
-    data: allItems.slice((page - 1) * pageSize, page * pageSize),
+    data: rawItems.map(toItem),
     total,
     page,
     pageSize,
-    totalPages: Math.ceil(total / pageSize),
+    totalPages,
     categories,
   };
 }
@@ -85,7 +102,9 @@ export async function getInventoryAlerts(): Promise<InventoryItem[]> {
 
 export async function getInventoryItem(id: string): Promise<InventoryItem> {
   const { data } = await apiClient.get(`/api/admin/inventory`, { params: { search: id } });
-  const item = getList(data).map(toItem).find((row) => row.id === id);
+  const item = getList(data)
+    .map(toItem)
+    .find((row) => row.id === id);
   if (!item) throw new Error("لم يتم العثور على المنتج في المخزون.");
   return item;
 }
@@ -108,30 +127,36 @@ export async function uploadInventory(
   });
   const result = unwrapApiResponse<Record<string, any>>(data);
   return {
-    success: Boolean(result && result.status === "Pending"),
-    imported: Number(result?.matchedRows ?? result?.imported ?? 0),
-    skipped: Number(result?.notAllowedRows ?? result?.skipped ?? 0),
-    errors: Array.isArray(result?.errors) ? result.errors : [],
+    success: true,
+    imported: Number(result?.matchedRows ?? 0),
+    skipped: Number(result?.notAllowedRows ?? 0),
+    errors: [],
     fileName: String(result?.fileName ?? file.name),
     uploadedAt: String(result?.createdDate ?? new Date().toISOString()),
+    requestId: result?.id !== undefined ? String(result.id) : undefined,
+    status: result?.status ?? "Pending",
+    message: "تم رفع الملف وجاري مراجعته من الإدارة.",
   };
 }
 
+/** Sends all editable fields; omit a field in the payload to keep its current value. */
 export async function updateInventoryItem(
   id: string,
   payload: UpdateInventoryItemRequest,
 ): Promise<InventoryItem> {
   const body: Record<string, unknown> = {};
   if (payload.stockCurrent !== undefined) body.newQuantity = payload.stockCurrent;
+  if (payload.stripQuantity !== undefined) body.newStripQuantity = payload.stripQuantity;
   if (payload.price !== undefined) body.price = payload.price;
+  if (payload.stripPrice !== undefined) body.stripPrice = payload.stripPrice;
   const { data } = await apiClient.put(`/api/admin/inventory/${encodeURIComponent(id)}`, body);
   return toItem(unwrapApiResponse<BackendInventoryItem>(data));
 }
 
 export async function adjustInventory(id: string, adjustment: number, reason: string) {
-  const { data } = await apiClient.put(
-    `/api/admin/inventory/${encodeURIComponent(id)}/adjust`,
-    { adjustment, reason },
-  );
+  const { data } = await apiClient.put(`/api/admin/inventory/${encodeURIComponent(id)}/adjust`, {
+    adjustment,
+    reason,
+  });
   return unwrapApiResponse<unknown>(data);
 }

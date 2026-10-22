@@ -8,7 +8,7 @@ export type OrderStatus =
   | "delivered"
   | "cancelled";
 
-export type PaymentMethod = "cash" | "card";
+export type PaymentMethod = "cash" | "card" | "card-on-delivery";
 
 export interface OrderProduct {
   id: string;

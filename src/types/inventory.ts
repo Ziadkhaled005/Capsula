@@ -20,7 +20,7 @@ export interface InventoryItem {
 export interface InventoryFilter {
   search?: string;
   category?: string;
-  stockStatus?: "in-stock" | "low-stock" | "out-of-stock" | "all";
+  stockStatus?: "in-stock" | "medium-stock" | "low-stock" | "out-of-stock" | "all";
   page?: number;
   pageSize?: number;
 }

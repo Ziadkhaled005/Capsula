@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { OrdersAPI } from "@/api";
-import type { OrdersFilter, OrderStatus, ProposeAlternativeRequest, SubmitOfferRequest } from "@/types";
+import type { OrdersFilter, OrderStatus, SubmitOfferRequest } from "@/types";
 
 export const ORDER_KEYS = {
   all: ["orders"] as const,
@@ -13,7 +13,6 @@ export function useOrders(filters: OrdersFilter = {}) {
   return useQuery({
     queryKey: ORDER_KEYS.list(filters),
     queryFn: () => OrdersAPI.getOrders(filters),
-    // Bid inbox is polled because the documented backend does not provide websockets.
     refetchInterval: filters.status === "open-bidding" || filters.status === "all" ? 15000 : false,
     staleTime: 5000,
   });
@@ -55,19 +54,27 @@ export function useDeclineBid() {
 }
 
 /**
- * Compatibility wrapper for the existing offer page. The current UI payload
- * contains only product alternatives, not the full fields required by the
- * documented submit-offer endpoint. The page must be updated before this can
- * safely submit a real offer; the function rejects instead of sending a
- * malformed request that could be mistaken for a saved offer.
+ * Real implementation — POST /api/admin/orders/items/{itemId}/alternatives
+ * once per proposed catalog alternative.
  */
 export function useProposeAlternative() {
+  const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (_payload: ProposeAlternativeRequest): Promise<{ success: boolean }> => {
-      throw new Error(
-        "نموذج العرض لا يرسل بعد جميع الحقول المطلوبة من الخادم. حدّث شاشة العرض لتضمين الخصم ووقت التحضير والتوصيل ورسوم التوصيل.",
+    mutationFn: async (
+      payload: import("@/types").ProposeAlternativeRequest,
+    ): Promise<{ success: boolean }> => {
+      const proposals = payload.proposals.flatMap((proposal) =>
+        proposal.alternatives.map((alt) => {
+          const formData = new FormData();
+          formData.append("SuggestedProductId", alt.productId);
+          formData.append("Quantity", String(alt.qty));
+          return OrdersAPI.proposeAlternative(proposal.originalProductId, formData);
+        }),
       );
+      await Promise.all(proposals);
+      return { success: true };
     },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ORDER_KEYS.all }),
   });
 }
 
