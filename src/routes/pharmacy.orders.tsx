@@ -3,6 +3,7 @@ import { useState } from "react";
 import { CreditCard, MapPin, Phone, Search, Wallet } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCancelOrder, useOrders, useUpdateOrderStatus } from "@/hooks/useOrders";
+import { useBidDetail } from "@/hooks/useBids";
 import type { Order as ApiOrder, OrderStatus } from "@/types";
 
 export const Route = createFileRoute("/pharmacy/orders")({
@@ -51,7 +52,8 @@ export function mapOrder(order: ApiOrder): Order {
     time: new Date(order.createdAt).toLocaleTimeString(),
     payment: order.payment,
     remaining: order.remainingMinutes === undefined ? undefined : `${order.remainingMinutes} دقيقة`,
-    items: order.products.length,
+    // The bids list provides itemCount even when it does not include the items array.
+    items: order.itemCount ?? order.products.length,
     price: order.total,
     status: order.status,
     products: order.products.map((product, index) => ({
@@ -69,15 +71,30 @@ export function mapOrder(order: ApiOrder): Order {
   };
 }
 
-export const statusBadge: Record<Exclude<StatusKey, "all">, { label: string; className: string }> = {
-  "open-bidding": { label: "مزايدة مفتوحة", className: "border-[#E87919] text-[#E87919] bg-transparent" },
-  "on-hold": { label: "الطلب معلق", className: "border-warning/40 text-warning-foreground bg-warning/10" },
-  "awaiting-customer-confirmation": { label: "بانتظار تأكيد العميل", className: "border-[#d8c596] text-[#8a7041] bg-[#fbf6e8]" },
+export const statusBadge: Record<
+  Exclude<StatusKey, "all">,
+  { label: string; className: string }
+> = {
+  "open-bidding": {
+    label: "مزايدة مفتوحة",
+    className: "border-[#E87919] text-[#E87919] bg-transparent",
+  },
+  "on-hold": {
+    label: "الطلب معلق",
+    className: "border-warning/40 text-warning-foreground bg-warning/10",
+  },
+  "awaiting-customer-confirmation": {
+    label: "بانتظار تأكيد العميل",
+    className: "border-[#d8c596] text-[#8a7041] bg-[#fbf6e8]",
+  },
   confirmed: { label: "تم التأكيد", className: "border-success/40 text-success bg-success/5" },
   preparing: { label: "جاري التجهيز", className: "border-border text-foreground bg-card" },
   "on-delivery": { label: "في طريق التوصيل", className: "border-border text-foreground bg-card" },
   delivered: { label: "تم التوصيل", className: "border-success/40 text-success bg-success/5" },
-  cancelled: { label: "تم الإلغاء", className: "border-destructive/40 text-destructive bg-destructive/5" },
+  cancelled: {
+    label: "تم الإلغاء",
+    className: "border-destructive/40 text-destructive bg-destructive/5",
+  },
 };
 
 const tabs: { key: StatusKey; label: string }[] = [
@@ -99,6 +116,7 @@ function OrdersPage() {
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [actionError, setActionError] = useState("");
+
   const ordersQuery = useOrders({
     status: active,
     search: query.trim() || undefined,
@@ -109,6 +127,24 @@ function OrdersPage() {
   const cancelOrder = useCancelOrder();
   const orders = (ordersQuery.data?.data ?? []).map(mapOrder);
   const selectedOrder = orders.find((order) => order.id === selectedId) ?? null;
+
+  // The bids list only returns itemCount. Fetch the selected bid's detail endpoint
+  // to retrieve its actual products (GET /api/admin/bids/{orderId}).
+  const selectedBidDetail = useBidDetail(
+    selectedOrder?.status === "open-bidding" ? selectedOrder.id : "",
+  );
+
+  const bidProducts: OrderItem[] = (selectedBidDetail.data?.items ?? []).map((item, index) => ({
+    productId: String(item.productId ?? item.id ?? index),
+    name: String(item.productName ?? "منتج"),
+    qty: Number(item.quantity ?? 0),
+    price: Number(item.price ?? item.pharmacyUnitPrice ?? 0),
+    color: ["bg-sky-100", "bg-purple-100", "bg-red-100", "bg-slate-200"][index % 4],
+    available: item.isInStock !== false,
+  }));
+
+  const selectedProducts =
+    selectedOrder?.status === "open-bidding" ? bidProducts : (selectedOrder?.products ?? []);
 
   const updateOrder = async (order: Order, status: OrderStatus) => {
     setActionError("");
@@ -179,11 +215,19 @@ function OrdersPage() {
         </div>
 
         {ordersQuery.isLoading ? (
-          <p role="status" className="py-12 text-center text-sm text-muted-foreground">جارٍ تحميل الطلبات...</p>
+          <p role="status" className="py-12 text-center text-sm text-muted-foreground">
+            جارٍ تحميل الطلبات...
+          </p>
         ) : ordersQuery.isError ? (
           <div role="alert" className="py-12 text-center text-sm text-destructive">
             <p>تعذر تحميل الطلبات.</p>
-            <button type="button" onClick={() => void ordersQuery.refetch()} className="mt-2 underline">إعادة المحاولة</button>
+            <button
+              type="button"
+              onClick={() => void ordersQuery.refetch()}
+              className="mt-2 underline"
+            >
+              إعادة المحاولة
+            </button>
           </div>
         ) : orders.length === 0 ? (
           <p className="py-12 text-center text-sm text-muted-foreground">لا توجد طلبات.</p>
@@ -204,7 +248,9 @@ function OrdersPage() {
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <div className="text-base font-bold text-foreground">{order.customer}</div>
-                      <div className="mt-1 text-xs text-muted-foreground">رقم الطلب: #{order.orderNo}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        رقم الطلب: #{order.orderNo}
+                      </div>
                       <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
                         <Phone className="h-3.5 w-3.5" />
                         <span dir="ltr">{order.phone}</span>
@@ -212,13 +258,22 @@ function OrdersPage() {
                         <span>{order.address}</span>
                       </div>
                     </div>
-                    <span className={cn("shrink-0 rounded-lg border px-3 py-1.5 text-xs font-medium", badge.className)}>
+                    <span
+                      className={cn(
+                        "shrink-0 rounded-lg border px-3 py-1.5 text-xs font-medium",
+                        badge.className,
+                      )}
+                    >
                       {badge.label}
                     </span>
                   </div>
                   <div className="mt-4 flex items-center justify-between text-sm text-muted-foreground">
                     <span className="inline-flex items-center gap-2">
-                      {order.payment === "cash" ? <Wallet className="h-4 w-4" /> : <CreditCard className="h-4 w-4" />}
+                      {order.payment === "cash" ? (
+                        <Wallet className="h-4 w-4" />
+                      ) : (
+                        <CreditCard className="h-4 w-4" />
+                      )}
                       {order.payment === "cash" ? "نقد" : "بطاقة ائتمان"}
                     </span>
                     <span>{order.items} منتجات</span>
@@ -234,44 +289,104 @@ function OrdersPage() {
           <div className="mt-5 flex items-center justify-between border-t border-border pt-4 text-sm text-muted-foreground">
             <span>{ordersQuery.data.total} طلبات</span>
             <div className="flex items-center gap-3">
-              <button type="button" disabled={page <= 1} onClick={() => setPage((value) => value - 1)} className="disabled:opacity-40">السابق</button>
-              <span>{page} / {ordersQuery.data.totalPages}</span>
-              <button type="button" disabled={page >= ordersQuery.data.totalPages} onClick={() => setPage((value) => value + 1)} className="disabled:opacity-40">التالي</button>
+              <button
+                type="button"
+                disabled={page <= 1}
+                onClick={() => setPage((value) => value - 1)}
+                className="disabled:opacity-40"
+              >
+                السابق
+              </button>
+              <span>
+                {page} / {ordersQuery.data.totalPages}
+              </span>
+              <button
+                type="button"
+                disabled={page >= ordersQuery.data.totalPages}
+                onClick={() => setPage((value) => value + 1)}
+                className="disabled:opacity-40"
+              >
+                التالي
+              </button>
             </div>
           </div>
         )}
 
-        {actionError && <p role="alert" className="mt-4 text-sm text-destructive">{actionError}</p>}
+        {actionError && (
+          <p role="alert" className="mt-4 text-sm text-destructive">
+            {actionError}
+          </p>
+        )}
+
         {selectedOrder && (
-          <section className="mt-5 rounded-xl border border-border bg-background p-5" aria-label="تفاصيل الطلب">
+          <section
+            className="mt-5 rounded-xl border border-border bg-background p-5"
+            aria-label="تفاصيل الطلب"
+          >
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="font-bold">تفاصيل الطلب #{selectedOrder.orderNo}</h2>
-                <p className="mt-1 text-sm text-muted-foreground">{selectedOrder.customer} · {selectedOrder.phone}</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {selectedOrder.customer} · {selectedOrder.phone}
+                </p>
               </div>
-              <button type="button" onClick={() => setSelectedId(null)} className="text-sm text-muted-foreground underline">إغلاق</button>
+              <button
+                type="button"
+                onClick={() => setSelectedId(null)}
+                className="text-sm text-muted-foreground underline"
+              >
+                إغلاق
+              </button>
             </div>
-            <ul className="mt-4 divide-y divide-border">
-              {selectedOrder.products.map((product) => (
-                <li key={product.productId} className="flex justify-between gap-4 py-2 text-sm">
-                  <span>{product.name} × {product.qty}</span>
-                  <span>{product.price.toFixed(2)} ج.م</span>
-                </li>
-              ))}
-            </ul>
+
+            {selectedOrder.status === "open-bidding" && selectedBidDetail.isLoading ? (
+              <p role="status" className="mt-4 text-sm text-muted-foreground">
+                جارٍ تحميل منتجات الطلب...
+              </p>
+            ) : selectedOrder.status === "open-bidding" && selectedBidDetail.isError ? (
+              <div role="alert" className="mt-4 text-sm text-destructive">
+                <p>تعذر تحميل تفاصيل المنتجات من الخادم.</p>
+                <button
+                  type="button"
+                  onClick={() => void selectedBidDetail.refetch()}
+                  className="mt-2 underline"
+                >
+                  إعادة المحاولة
+                </button>
+              </div>
+            ) : selectedProducts.length === 0 ? (
+              <p className="mt-4 text-sm text-muted-foreground">
+                لا توجد تفاصيل منتجات في استجابة الخادم.
+              </p>
+            ) : (
+              <ul className="mt-4 divide-y divide-border">
+                {selectedProducts.map((product) => (
+                  <li key={product.productId} className="flex justify-between gap-4 py-2 text-sm">
+                    <span>
+                      {product.name} × {product.qty}
+                    </span>
+                    <span>{product.price.toFixed(2)} ج.م</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+
             {selectedOrder.status === "open-bidding" && (
               <button
                 type="button"
-                onClick={() => navigate({
-                  to: "/pharmacy/offer/$orderNo",
-                  params: { orderNo: selectedOrder.orderNo },
-                  search: { editOffer: false },
-                })}
+                onClick={() =>
+                  navigate({
+                    to: "/pharmacy/offer/$orderNo",
+                    params: { orderNo: selectedOrder.orderNo },
+                    search: { editOffer: false },
+                  })
+                }
                 className="mt-4 rounded-full bg-[#E87919] px-5 py-2.5 text-sm font-medium text-white hover:opacity-90"
               >
                 اقتراح بدائل للطلب
               </button>
             )}
+
             {selectedOrder.status === "on-hold" && (
               <p role="status" className="mt-4 text-sm text-muted-foreground">
                 استرجاع أو تعديل تفاصيل العرض يتطلب endpoint لقراءة العرض، وهو غير متاح حالياً.
@@ -300,7 +415,7 @@ function OrdersPage() {
                   onClick={() => void handleCancel(selectedOrder)}
                   className="rounded-lg border border-destructive/40 px-4 py-2 text-sm text-destructive disabled:opacity-50"
                 >
-                  إلغاء الطلب
+                  {cancelOrder.isPending ? "جارٍ الإلغاء..." : "إلغاء الطلب"}
                 </button>
               )}
             </div>

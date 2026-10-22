@@ -40,6 +40,8 @@ export interface Order {
     addressDetail?: string;
   };
   products: OrderProduct[];
+  /** Count returned by list endpoints; may be available before product details load. */
+  itemCount?: number;
   status: OrderStatus;
   payment: PaymentMethod;
   subtotal: number;

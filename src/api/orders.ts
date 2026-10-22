@@ -24,9 +24,12 @@ const STATUS_TO_API: Partial<Record<OrderStatus, string>> = {
 
 function statusFromApi(value: unknown): OrderStatus {
   switch (String(value ?? "").toLowerCase()) {
+    case "open":
     case "waitingforoffers":
+    case "open-bidding":
       return "open-bidding";
     case "pendingconfirmation":
+    case "awaiting-customer-confirmation":
       return "awaiting-customer-confirmation";
     case "confirmed":
       return "confirmed";
@@ -48,7 +51,7 @@ function statusFromApi(value: unknown): OrderStatus {
 function paymentFromApi(value: unknown): "cash" | "card" | "card-on-delivery" {
   const v = String(value ?? "").toLowerCase();
   if (v === "cash") return "cash";
-  if (v === "cardondelivery") return "card-on-delivery";
+  if (v === "cardondelivery" || v === "card-on-delivery") return "card-on-delivery";
   return "card";
 }
 
@@ -59,9 +62,10 @@ function toIso(value: unknown): string {
 }
 
 function mapProduct(item: BackendOrder, index: number): OrderProduct {
-  const id = String(item.productId ?? item.id ?? index);
+  const id = String(item.productId ?? item.id ?? item.orderItemId ?? index);
   const qty = Number(item.quantity ?? item.qty ?? 0);
-  const unitPrice = Number(item.price ?? item.unitPrice ?? 0);
+  const unitPrice = Number(item.price ?? item.unitPrice ?? item.pharmacyUnitPrice ?? 0);
+
   return {
     id,
     name: String(item.productName ?? item.name ?? "منتج"),
@@ -74,16 +78,20 @@ function mapProduct(item: BackendOrder, index: number): OrderProduct {
   };
 }
 
+function getOrderItems(raw: BackendOrder): BackendOrder[] {
+  if (Array.isArray(raw.items)) return raw.items;
+  if (Array.isArray(raw.products)) return raw.products;
+  if (Array.isArray(raw.orderItems)) return raw.orderItems;
+  return [];
+}
+
 function mapBackendOrder(raw: BackendOrder): Order {
   const address = raw.deliveryAddress ?? {};
-  const items = Array.isArray(raw.items)
-    ? raw.items
-    : Array.isArray(raw.products)
-      ? raw.products
-      : [];
+  const items = getOrderItems(raw);
   const total = Number(raw.totalAmount ?? raw.total ?? raw.initialTotal ?? raw.subTotal ?? 0);
   const subtotal = Number(raw.subTotal ?? raw.subtotal ?? total);
   const discount = Number(raw.offerDiscount ?? raw.discount ?? 0);
+
   return {
     id: String(raw.id ?? raw.orderId ?? ""),
     orderNo: String(raw.orderNo ?? raw.id ?? raw.orderId ?? ""),
@@ -101,6 +109,7 @@ function mapBackendOrder(raw: BackendOrder): Order {
           .join("، ") || undefined,
     },
     products: items.map(mapProduct),
+    itemCount: Number(raw.itemCount ?? items.length),
     status: statusFromApi(raw.status),
     payment: paymentFromApi(raw.paymentMethod ?? raw.payment),
     subtotal,
@@ -116,6 +125,7 @@ function mapBackendOrder(raw: BackendOrder): Order {
 
 function mapBid(raw: BackendBid): Order {
   const orderId = String(raw.orderId ?? raw.id ?? "");
+  const items = getOrderItems(raw);
   const estimatedSubtotal = Number(raw.estimatedSubTotal ?? raw.estimatedSubtotal ?? 0);
   const createdAt = toIso(raw.createdDate ?? raw.createdAt);
   const deadline = raw.offersDeadline ? new Date(toIso(raw.offersDeadline)).getTime() : 0;
@@ -130,7 +140,10 @@ function mapBid(raw: BackendBid): Order {
       phone: String(raw.customerPhone ?? ""),
       address: String(raw.region ?? raw.deliveryAddress?.region ?? "—"),
     },
-    products: (Array.isArray(raw.items) ? raw.items : []).map(mapProduct),
+    // The list endpoint returns itemCount, but item details are fetched from
+    // GET /api/admin/bids/{orderId}. Keep the count separately from products.
+    products: items.map(mapProduct),
+    itemCount: Number(raw.itemCount ?? items.length),
     status: "open-bidding",
     payment: paymentFromApi(raw.paymentMethod),
     subtotal: estimatedSubtotal,
@@ -147,11 +160,14 @@ function mapBid(raw: BackendBid): Order {
 function getArray(payload: unknown): BackendOrder[] {
   const value = unwrapApiResponse<unknown>(payload);
   if (Array.isArray(value)) return value as BackendOrder[];
+
   if (value && typeof value === "object") {
     const record = value as Record<string, unknown>;
     if (Array.isArray(record.items)) return record.items as BackendOrder[];
     if (Array.isArray(record.data)) return record.data as BackendOrder[];
+    if (Array.isArray(record.value)) return record.value as BackendOrder[];
   }
+
   throw new Error("استجابة الطلبات من الخادم ليست بالقالب المتوقع.");
 }
 
@@ -172,6 +188,7 @@ function paginate(orders: Order[], filters: OrdersFilter): OrdersResponse {
   const pageSize = Math.max(1, filters.pageSize ?? 10);
   const total = orders.length;
   const totalPages = Math.ceil(total / pageSize);
+
   return {
     data: orders.slice((page - 1) * pageSize, page * pageSize),
     total,
@@ -183,7 +200,7 @@ function paginate(orders: Order[], filters: OrdersFilter): OrdersResponse {
 
 /**
  * GET /api/admin/orders and GET /api/admin/bids.
- * The documented orders endpoint returns an array; bidding orders live in /bids.
+ * The bids list contains itemCount; product details are loaded from the bid-detail endpoint.
  */
 export async function getOrders(filters: OrdersFilter = {}): Promise<OrdersResponse> {
   const status = filters.status ?? "all";
@@ -197,6 +214,7 @@ export async function getOrders(filters: OrdersFilter = {}): Promise<OrdersRespo
     const params: Record<string, string> = {};
     if (search.trim()) params.search = search.trim();
     if (status !== "all" && STATUS_TO_API[status]) params.status = STATUS_TO_API[status]!;
+
     const { data } = await apiClient.get("/api/admin/orders", { params });
     orders = getArray(data).map(mapBackendOrder);
 
@@ -210,6 +228,7 @@ export async function getOrders(filters: OrdersFilter = {}): Promise<OrdersRespo
   if (status !== "all") orders = orders.filter((order) => order.status === status);
   if (search.trim()) orders = orders.filter((order) => matchesSearch(order, search));
   orders.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
   return paginate(orders, filters);
 }
 
@@ -252,6 +271,7 @@ export async function updateOrderStatus(
     newStatus: apiStatus,
     note: payload.notes,
   });
+
   return mapBackendOrder(unwrapApiResponse<BackendOrder>(data));
 }
 
