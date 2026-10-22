@@ -79,7 +79,10 @@ export interface ProposeAlternativeRequest {
   orderId: string;
   proposals: {
     originalProductId: string;
-    alternatives: { productId: string; qty: number }[];
+    alternatives: {
+      productId: string;
+      qty: number;
+    }[];
   }[];
 }
 
@@ -87,4 +90,24 @@ export interface ProposeAlternativeResponse {
   success: boolean;
   orderId: string;
   newStatus: OrderStatus;
+}
+
+export type BackendOrderStatus =
+  | "PendingConfirmation"
+  | "Confirmed"
+  | "OnHold"
+  | "InPreparation"
+  | "InRoute"
+  | "Delivered"
+  | "Cancelled"
+  | "WaitingForOffers";
+
+export interface SubmitOfferRequest {
+  discountPercentage: number;
+  preparationMinutes: number;
+  deliveryMinutes: number;
+  deliveryFee: number;
+  notes?: string | null;
+  prescriptionAmount?: number | null;
+  unavailableItems: { orderItemId: number; alternativeProductIds: number[] }[];
 }

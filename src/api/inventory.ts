@@ -7,77 +7,92 @@ import type {
   UpdateInventoryItemRequest,
 } from "@/types";
 
-const STOCK_STATUS_TO_API: Record<string, string> = {
-  "in-stock": "Available",
-  "low-stock": "Low",
-  "out-of-stock": "OutOfStock",
-};
+type BackendInventoryItem = Record<string, any>;
 
-function mapInventoryItem(raw: any): InventoryItem {
+function toItem(raw: BackendInventoryItem): InventoryItem {
+  const quantity = Number(raw.quantity ?? raw.stockCurrent ?? 0);
+  const price = Number(raw.price ?? 0);
   return {
     id: String(raw.productId ?? raw.id ?? ""),
-    name: String(raw.productName ?? raw.name ?? "—"),
-    sku: String(raw.code ?? raw.sku ?? raw.productId ?? ""),
-    category: String(raw.categoryName ?? raw.category ?? "—"),
-    stockTotal: Number(raw.reorderLevel ?? raw.stockTotal ?? 0),
-    stockCurrent: Number(raw.quantity ?? raw.stockCurrent ?? 0),
-    price: Number(raw.price ?? 0),
-    lastUpdated: raw.lastUpdated ?? "",
-    imageUrl: raw.imageUrl,
-    description: raw.description,
-    barcode: raw.barcode,
-    expiryDate: raw.expiryDate,
-    manufacturer: raw.manufacturer,
-    stripQuantity: raw.stripQuantity == null ? undefined : Number(raw.stripQuantity),
-    stripPrice: raw.stripPrice == null ? undefined : Number(raw.stripPrice),
-    stockStatus: raw.status,
+    name: String(raw.productName ?? raw.name ?? ""),
+    sku: String(raw.code ?? raw.sku ?? ""),
+    category: String(raw.categoryName ?? raw.category ?? ""),
+    stockTotal: quantity,
+    stockCurrent: quantity,
+    price,
+    lastUpdated: String(raw.lastUpdated ?? raw.updatedAt ?? ""),
+    imageUrl: raw.imageUrl ?? raw.productImageUrl ?? undefined,
+    description: raw.description ?? undefined,
+    barcode: raw.barcode ?? raw.code ?? undefined,
+    expiryDate: raw.expiryDate ?? undefined,
+    manufacturer: raw.manufacturer ?? undefined,
   };
 }
 
-export async function getInventory(filters: InventoryFilter = {}): Promise<InventoryResponse> {
-  const { data } = await apiClient.get("/api/admin/inventory", {
-    params: {
-      categoryId: filters.category ? Number(filters.category) || undefined : undefined,
-      search: filters.search?.trim() || undefined,
-      status: filters.stockStatus && filters.stockStatus !== "all"
-        ? STOCK_STATUS_TO_API[filters.stockStatus]
-        : undefined,
-      page: filters.page ?? 1,
-      pageSize: filters.pageSize ?? 10,
-    },
-  });
+function getList(payload: unknown): BackendInventoryItem[] {
+  const value = unwrapApiResponse<unknown>(payload);
+  if (Array.isArray(value)) return value as BackendInventoryItem[];
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    if (Array.isArray(record.items)) return record.items as BackendInventoryItem[];
+    if (Array.isArray(record.data)) return record.data as BackendInventoryItem[];
+  }
+  throw new Error("استجابة المخزون من الخادم ليست بالقالب المتوقع.");
+}
 
-  const result = unwrapApiResponse<any>(data);
-  const rows = Array.isArray(result) ? result : (result?.items ?? result?.data ?? []);
-  const mapped = rows.map(mapInventoryItem);
-  const total = Number(result?.totalCount ?? result?.total ?? mapped.length);
-  const page = Number(result?.page ?? filters.page ?? 1);
-  const pageSize = Number(result?.pageSize ?? filters.pageSize ?? 10);
+function stockStatus(raw: BackendInventoryItem): InventoryFilter["stockStatus"] {
+  const status = String(raw.status ?? "").toLowerCase();
+  if (status === "outofstock" || status === "out-of-stock") return "out-of-stock";
+  if (status === "low" || status === "low-stock") return "low-stock";
+  return "in-stock";
+}
+
+export async function getInventory(filters: InventoryFilter = {}): Promise<InventoryResponse> {
+  const params: Record<string, string | number> = {};
+  if (filters.search?.trim()) params.search = filters.search.trim();
+  if (filters.category?.trim()) {
+    const categoryId = Number(filters.category);
+    if (Number.isFinite(categoryId)) params.categoryId = categoryId;
+  }
+  if (filters.stockStatus && filters.stockStatus !== "all") {
+    params.status = filters.stockStatus === "out-of-stock"
+      ? "OutOfStock"
+      : filters.stockStatus === "low-stock" ? "Low" : "Available";
+  }
+
+  const { data } = await apiClient.get("/api/admin/inventory", { params });
+  const rawItems = getList(data);
+  const allItems = rawItems.map(toItem);
+  const categories = [...new Set(rawItems.map((item) => String(item.categoryName ?? item.category ?? "")).filter(Boolean))];
+  const page = Math.max(1, filters.page ?? 1);
+  const pageSize = Math.max(1, filters.pageSize ?? 10);
+  const total = Number((unwrapApiResponse<any>(data) as any)?.totalCount ?? allItems.length);
 
   return {
-    data: mapped,
+    data: allItems.slice((page - 1) * pageSize, page * pageSize),
     total,
     page,
     pageSize,
-    totalPages: Number(result?.totalPages ?? Math.ceil(total / Math.max(1, pageSize))),
-    categories: [...new Set(mapped.map((item: InventoryItem) => item.category).filter((value: string) => value && value !== "—"))],
+    totalPages: Math.ceil(total / pageSize),
+    categories,
   };
 }
 
 export async function getInventoryAlerts(): Promise<InventoryItem[]> {
   const { data } = await apiClient.get("/api/admin/inventory/alerts");
-  const result = unwrapApiResponse<any>(data);
-  const rows = Array.isArray(result) ? result : (result?.items ?? result?.data ?? []);
-  return rows.map(mapInventoryItem);
+  return getList(data).map(toItem);
 }
 
 export async function getInventoryItem(id: string): Promise<InventoryItem> {
-  const response = await getInventory({ search: id, page: 1, pageSize: 100 });
-  const item = response.data.find((entry) => entry.id === id || entry.sku === id);
+  const { data } = await apiClient.get(`/api/admin/inventory`, { params: { search: id } });
+  const item = getList(data).map(toItem).find((row) => row.id === id);
   if (!item) throw new Error("لم يتم العثور على المنتج في المخزون.");
   return item;
 }
 
+/**
+ * Upload creates a Pending inventory request. It does not immediately alter stock.
+ */
 export async function uploadInventory(
   file: File,
   onUploadProgress?: (percent: number) => void,
@@ -86,22 +101,19 @@ export async function uploadInventory(
   formData.append("file", file);
   const { data } = await apiClient.post("/api/admin/inventory/bulk-update", formData, {
     onUploadProgress: (event) => {
-      if (onUploadProgress && event.total) onUploadProgress(Math.round((event.loaded / event.total) * 100));
+      if (onUploadProgress && event.total) {
+        onUploadProgress(Math.round((event.loaded * 100) / event.total));
+      }
     },
   });
-
-  const request = unwrapApiResponse<any>(data);
-  // This endpoint creates a review request; it does not apply stock immediately.
+  const result = unwrapApiResponse<Record<string, any>>(data);
   return {
-    success: true,
-    imported: 0,
-    skipped: Number(request?.notAllowedRows ?? 0),
-    errors: [],
-    fileName: request?.fileName ?? file.name,
-    uploadedAt: request?.createdDate ?? new Date().toISOString(),
-    requestId: request?.id == null ? undefined : String(request.id),
-    status: request?.status ?? "Pending",
-    message: "تم رفع الملف بنجاح، والمخزون ينتظر المراجعة والموافقة.",
+    success: Boolean(result && result.status === "Pending"),
+    imported: Number(result?.matchedRows ?? result?.imported ?? 0),
+    skipped: Number(result?.notAllowedRows ?? result?.skipped ?? 0),
+    errors: Array.isArray(result?.errors) ? result.errors : [],
+    fileName: String(result?.fileName ?? file.name),
+    uploadedAt: String(result?.createdDate ?? new Date().toISOString()),
   };
 }
 
@@ -111,18 +123,15 @@ export async function updateInventoryItem(
 ): Promise<InventoryItem> {
   const body: Record<string, unknown> = {};
   if (payload.stockCurrent !== undefined) body.newQuantity = payload.stockCurrent;
-  if (payload.stripQuantity !== undefined) body.newStripQuantity = payload.stripQuantity;
   if (payload.price !== undefined) body.price = payload.price;
-  if (payload.stripPrice !== undefined) body.stripPrice = payload.stripPrice;
-
   const { data } = await apiClient.put(`/api/admin/inventory/${encodeURIComponent(id)}`, body);
-  return mapInventoryItem(unwrapApiResponse<any>(data));
+  return toItem(unwrapApiResponse<BackendInventoryItem>(data));
 }
 
-export async function adjustInventory(id: string, adjustment: number, reason: string): Promise<void> {
-  const { data } = await apiClient.put(`/api/admin/inventory/${encodeURIComponent(id)}/adjust`, {
-    adjustment,
-    reason,
-  });
-  unwrapApiResponse<unknown>(data);
+export async function adjustInventory(id: string, adjustment: number, reason: string) {
+  const { data } = await apiClient.put(
+    `/api/admin/inventory/${encodeURIComponent(id)}/adjust`,
+    { adjustment, reason },
+  );
+  return unwrapApiResponse<unknown>(data);
 }

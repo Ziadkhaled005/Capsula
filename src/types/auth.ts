@@ -16,13 +16,23 @@ export interface LoginRequest {
 export interface LoginResponse {
   user: User;
   accessToken: string;
-  /** The documented backend does not currently issue refresh tokens. */
   refreshToken: string;
   expiresIn: number;
 }
 
-export interface ForgotPasswordRequest {
-  email: string;
+export interface RefreshTokenRequest {
+  refreshToken: string;
+}
+
+export interface RefreshTokenResponse {
+  accessToken: string;
+  refreshToken: string;
+  expiresIn: number;
+}
+
+export interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
 }
 
 export interface ResetPasswordRequest {
@@ -31,7 +41,6 @@ export interface ResetPasswordRequest {
   newPassword: string;
 }
 
-export interface ChangePasswordRequest {
-  currentPassword: string;
-  newPassword: string;
+export interface ForgotPasswordRequest {
+  email: string;
 }

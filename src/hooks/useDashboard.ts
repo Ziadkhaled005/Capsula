@@ -7,32 +7,32 @@ export const DASHBOARD_KEYS = {
   pharmacy: () => ["dashboard", "pharmacy"] as const,
 };
 
-/**
- * Fetch live dashboard stats and recent orders.
- */
 export function useDashboard() {
   return useQuery({
     queryKey: DASHBOARD_KEYS.stats(),
     queryFn: DashboardAPI.getDashboard,
-    refetchInterval: 60_000,
-    staleTime: 30_000,
+    refetchInterval: 30000,
+    staleTime: 10000,
   });
 }
 
-/**
- * Fetch the current pharmacy profile.
- */
+export function useSuperAdminDashboard() {
+  return useQuery({
+    queryKey: ["dashboard", "superadmin"] as const,
+    queryFn: () => DashboardAPI.getSuperAdminDashboard(),
+    refetchInterval: 30000,
+    staleTime: 10000,
+  });
+}
+
 export function usePharmacy() {
   return useQuery({
     queryKey: DASHBOARD_KEYS.pharmacy(),
     queryFn: DashboardAPI.getPharmacy,
-    staleTime: 300_000,
+    staleTime: 300000,
   });
 }
 
-/**
- * Mutation: toggle pharmacy availability (accepting orders on/off).
- */
 export function useSetPharmacyAvailability() {
   const qc = useQueryClient();
   return useMutation({

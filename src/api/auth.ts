@@ -3,6 +3,7 @@ import type {
   User,
   LoginRequest,
   LoginResponse,
+  RefreshTokenResponse,
   ForgotPasswordRequest,
   ResetPasswordRequest,
   ChangePasswordRequest,
@@ -23,8 +24,8 @@ type BackendUser = Partial<User> & {
 type BackendLoginResponse = BackendUser & {
   user?: BackendUser;
   token?: string;
-  accessToken?: string;
   jwtToken?: string;
+  accessToken?: string;
   access_token?: string;
   refreshToken?: string;
   refresh_token?: string;
@@ -35,17 +36,17 @@ function normalizeRole(user: BackendUser): User["role"] {
   const roles = (user.roles ?? (user.role ? [user.role] : []))
     .map((role) => role.trim().toLowerCase());
 
-  if (roles.includes("superadmin") || roles.includes("admin")) return "admin";
+  if (roles.some((role) => role === "superadmin" || role === "admin")) return "admin";
   if (roles.includes("pharmacist")) return "pharmacist";
-  throw new Error("الحساب لا يملك صلاحية دخول لوحة التحكم.");
+  throw new Error("الحساب لا يملك صلاحية الدخول إلى لوحة الإدارة أو الصيدلية.");
 }
 
 function normalizeUser(user: BackendUser, fallbackEmail: string): User {
   const name =
-    user.fullName ||
     user.name ||
-    user.userName ||
+    user.fullName ||
     [user.firstName, user.lastName].filter(Boolean).join(" ") ||
+    user.userName ||
     fallbackEmail;
 
   return {
@@ -59,52 +60,72 @@ function normalizeUser(user: BackendUser, fallbackEmail: string): User {
   };
 }
 
-export async function login(payload: LoginRequest): Promise<LoginResponse> {
-  const { data } = await apiClient.post("/api/Auth/Login", payload);
-  const response = unwrapApiResponse<BackendLoginResponse>(data);
-  const user = normalizeUser(response.user ?? response, payload.email);
+function normalizeLoginResponse(payload: unknown, email: string): LoginResponse {
+  const response = unwrapApiResponse<BackendLoginResponse>(payload);
+  const backendUser = response.user ?? response;
   const accessToken =
-    response.token ?? response.accessToken ?? response.jwtToken ?? response.access_token ?? "";
+    response.accessToken ??
+    response.token ??
+    response.jwtToken ??
+    response.access_token ??
+    "";
 
-  if (!accessToken.trim()) throw new Error("استجابة تسجيل الدخول لا تحتوي على رمز الدخول.");
-  if (!user.id) throw new Error("استجابة تسجيل الدخول لا تحتوي على معرّف المستخدم.");
+  if (!accessToken.trim()) {
+    throw new Error("استجابة تسجيل الدخول لا تحتوي على رمز الدخول.");
+  }
+
+  const user = normalizeUser(backendUser, email);
+  if (!user.id) {
+    throw new Error("استجابة تسجيل الدخول لا تحتوي على معرّف المستخدم.");
+  }
 
   return {
     user,
     accessToken,
-    // The documented API does not issue refresh tokens. Keep this optional for old callers.
+    // Capsula's integration guide explicitly states there is no refresh endpoint.
     refreshToken: "",
     expiresIn: response.expiresIn ?? 86400,
   };
 }
 
+/** POST /api/Auth/Login */
+export async function login(payload: LoginRequest): Promise<LoginResponse> {
+  const { data } = await apiClient.post("/api/Auth/Login", payload);
+  return normalizeLoginResponse(data, payload.email);
+}
+
+/** GET /api/Auth/GetCurrentUser */
 export async function getCurrentUser(): Promise<User> {
   const { data } = await apiClient.get("/api/Auth/GetCurrentUser");
-  const response = unwrapApiResponse<BackendUser>(data);
-  const user = normalizeUser(response, response.email ?? "");
-  if (!user.id) throw new Error("استجابة المستخدم الحالي لا تحتوي على معرّف.");
-  return user;
+  const raw = unwrapApiResponse<BackendUser>(data);
+  return normalizeUser(raw, raw.email ?? raw.userName ?? "");
 }
 
 export async function logout(): Promise<void> {
-  if (typeof window === "undefined") return;
-  localStorage.removeItem("accessToken");
-  localStorage.removeItem("token");
-  localStorage.removeItem("refreshToken");
-  localStorage.removeItem("user");
+  for (const key of ["accessToken", "token", "refreshToken", "user"]) {
+    localStorage.removeItem(key);
+  }
 }
 
+/**
+ * Kept for compatibility with older imports only. The documented backend
+ * has no refresh endpoint, so this function intentionally does not issue a request.
+ */
+export async function refreshToken(_token: string): Promise<RefreshTokenResponse> {
+  throw new Error("تسجيل الدخول في كبسولة لا يدعم تجديد الرمز؛ يرجى تسجيل الدخول مرة أخرى.");
+}
+
+/** POST /api/Auth/ForgotPassword */
 export async function forgotPassword(payload: ForgotPasswordRequest): Promise<void> {
-  const { data } = await apiClient.post("/api/Auth/ForgotPassword", payload);
-  unwrapApiResponse<unknown>(data);
+  await apiClient.post("/api/Auth/ForgotPassword", payload);
 }
 
+/** POST /api/Auth/ResetPassword */
 export async function resetPassword(payload: ResetPasswordRequest): Promise<void> {
-  const { data } = await apiClient.post("/api/Auth/ResetPassword", payload);
-  unwrapApiResponse<unknown>(data);
+  await apiClient.post("/api/Auth/ResetPassword", payload);
 }
 
+/** PUT /api/Auth/ChangePassword */
 export async function changePassword(payload: ChangePasswordRequest): Promise<void> {
-  const { data } = await apiClient.put("/api/Auth/ChangePassword", payload);
-  unwrapApiResponse<unknown>(data);
+  await apiClient.put("/api/Auth/ChangePassword", payload);
 }
