@@ -37,8 +37,11 @@ function statusForOrder(status: ApiOrderStatus): Exclude<StatusKey, "all"> {
       return "awaiting-customer-confirmation";
     case "Confirmed":
       return "confirmed";
+    // "on-hold" is the design's state for a submitted offer (edit/withdraw actions).
+    // An order the pharmacy paused is still waiting for its confirmation, and that
+    // panel offers "تأكيد الطلب" to resume it (OnHold -> Confirmed).
     case "OnHold":
-      return "on-hold";
+      return "awaiting-customer-confirmation";
     case "InPreparation":
       return "preparing";
     case "InRoute":

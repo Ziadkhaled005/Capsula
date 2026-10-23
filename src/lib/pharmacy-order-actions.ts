@@ -85,6 +85,10 @@ export async function applyOrderStatusChange(
   }
   const apiStatus = orderStatusMap[status];
   if (!apiStatus) return null;
+  // OnHold -> OnHold is not a valid transition; the order is already paused.
+  if (apiStatus === "OnHold" && order.rawOrder?.status === "OnHold") {
+    return "الطلب قيد الانتظار بالفعل";
+  }
   await OrdersAPI.updateOrderStatus(order.apiId, apiStatus);
   return "تم تحديث حالة الطلب";
 }
