@@ -9,6 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { InventoryAPI } from "@/api";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import type { InventoryItem } from "@/types";
 import type { OrderItem } from "@/routes/pharmacy.orders";
 
@@ -43,6 +44,7 @@ export function InventoryAlternativePicker({
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
+  const debouncedSearch = useDebouncedValue(search);
 
   useEffect(() => {
     let current = true;
@@ -52,7 +54,13 @@ export function InventoryAlternativePicker({
       setLoadError(false);
 
       try {
-        const response = await InventoryAPI.getInventory({ status: "Available", pageSize: 100 });
+        // Any product with stock can be offered. The API's "Available" status only
+        // covers quantities above the medium threshold, so Low and Medium stock
+        // would be hidden; filter on quantity instead and search on the server.
+        const response = await InventoryAPI.getInventory({
+          search: debouncedSearch.trim() || undefined,
+          pageSize: 100,
+        });
 
         if (current) {
           const requestedName = normalizeProductName(requestedProduct.name);
@@ -82,7 +90,7 @@ export function InventoryAlternativePicker({
     return () => {
       current = false;
     };
-  }, [requestedProduct.name, retryKey]);
+  }, [requestedProduct.name, retryKey, debouncedSearch]);
 
   const filteredInventory = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
