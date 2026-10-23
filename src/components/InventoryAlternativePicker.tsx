@@ -11,10 +11,6 @@ import {
 import { InventoryAPI } from "@/api";
 import type { InventoryItem } from "@/types";
 import type { OrderItem } from "@/routes/pharmacy.orders";
-import panadolAdvance from "../../attached_assets/offer-panadol-advance.png";
-import panadolExtra from "../../attached_assets/offer-panadol-extra.png";
-import panadolHeadache from "../../attached_assets/offer-panadol-headache.png";
-import panadolNight from "../../attached_assets/offer-panadol-night.png";
 
 type InventoryAlternativePickerProps = {
   requestedProduct: OrderItem;
@@ -22,18 +18,8 @@ type InventoryAlternativePickerProps = {
   onChoose: (alternatives: InventoryItem[]) => void;
 };
 
-const localProductImages: Array<{ match: string; image: string }> = [
-  { match: "نايت", image: panadolNight },
-  { match: "اكسترا", image: panadolExtra },
-  { match: "صداع", image: panadolHeadache },
-  { match: "ادفانس", image: panadolAdvance },
-];
-
 function getProductImage(item: InventoryItem) {
-  if (item.imageUrl) return item.imageUrl;
-
-  const normalizedName = item.name.replace(/[أإآ]/g, "ا");
-  return localProductImages.find(({ match }) => normalizedName.includes(match))?.image;
+  return item.imageUrl;
 }
 
 function normalizeProductName(name: string) {
@@ -66,14 +52,23 @@ export function InventoryAlternativePicker({
       setLoadError(false);
 
       try {
-        const response = await InventoryAPI.getInventory({ stockStatus: "in-stock", pageSize: 100 });
+        const response = await InventoryAPI.getInventory({ status: "Available", pageSize: 100 });
 
         if (current) {
           const requestedName = normalizeProductName(requestedProduct.name);
           setInventory(
-            response.data.filter(
-              (item) => item.stockCurrent > 0 && normalizeProductName(item.name) !== requestedName,
-            ),
+            response.items
+              .filter((item) => item.quantity > 0 && normalizeProductName(item.productName) !== requestedName)
+              .map((item) => ({
+                id: String(item.productId),
+                name: item.productName,
+                sku: String(item.productId),
+                category: item.categoryName ?? "",
+                stockTotal: item.quantity,
+                stockCurrent: item.quantity,
+                price: item.price,
+                lastUpdated: item.lastUpdated ?? "",
+              })),
           );
         }
       } catch {

@@ -1,15 +1,27 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
-import { ArrowRight, CircleAlert, LoaderCircle } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ArrowRight, CircleAlert } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { OfferSubmissionForm, type OfferSubmissionPayload } from "@/components/OfferSubmissionForm";
-import { useOrders, useSubmitOffer } from "@/hooks/useOrders";
-import { useBidDetail } from "@/hooks/useBids";
-import type { SubmitOfferRequest } from "@/types";
-import { mapOrder } from "./pharmacy.orders";
+import {
+  OfferSubmissionForm,
+  type OfferSubmissionPayload,
+} from "@/components/OfferSubmissionForm";
+import { OfferSuccessDialog } from "@/components/OfferSuccessDialog";
+import { OrdersAPI, ApiError } from "@/api";
+import type { BidListItem, JsonRecord } from "@/api/contracts";
+import {
+  mapBidToOrder,
+} from "@/lib/pharmacy-api-mappers";
+import { fillAlternativePrices } from "@/lib/pharmacy-order-actions";
+import {
+  toOfferFormPayload,
+  toOfferRequest,
+  type Order,
+} from "./pharmacy.orders";
 
 export const Route = createFileRoute("/pharmacy/offer/$orderNo")({
-  head: () => ({ meta: [{ title: "اقتراح بدائل - كبسولة" }] }),
+  head: () => ({ meta: [{ title: "تقديم عرض - لوحة الصيدلية" }] }),
   validateSearch: (search: Record<string, unknown>) => ({
     editOffer: search.editOffer === true || search.editOffer === "true",
   }),
@@ -20,130 +32,130 @@ function OfferPage() {
   const { orderNo } = Route.useParams();
   const { editOffer } = Route.useSearch();
   const navigate = useNavigate();
+  const [order, setOrder] = useState<Order | null>(null);
+  const [savedOfferDraft, setSavedOfferDraft] = useState<OfferSubmissionPayload | null>(null);
+  const [isEditingOffer, setIsEditingOffer] = useState(false);
+  const [submittedOffer, setSubmittedOffer] = useState<OfferSubmissionPayload | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [pageError, setPageError] = useState("");
+  const [defaultPreparationMinutes, setDefaultPreparationMinutes] = useState<number | null>(null);
 
-  const [submitError, setSubmitError] = useState("");
+  // The form has no preparation-time field; use the pharmacy's own default.
+  useEffect(() => {
+    OrdersAPI.getAutoOfferTemplate()
+      .then((template) => {
+        const minutes = Number(template?.preparationMinutes);
+        if (Number.isFinite(minutes) && minutes > 0) setDefaultPreparationMinutes(minutes);
+      })
+      .catch(() => setDefaultPreparationMinutes(null));
+  }, []);
 
-  const ordersQuery = useOrders({ search: orderNo, pageSize: 100 });
-  const apiOrder = ordersQuery.data?.data.find((candidate) => candidate.orderNo === orderNo);
-  const order = apiOrder ? mapOrder(apiOrder) : null;
+  useEffect(() => {
+    let current = true;
+    const loadBid = async () => {
+      setLoading(true);
+      setPageError("");
+      const id = Number(orderNo);
+      if (!Number.isInteger(id) || id <= 0) {
+        setPageError("رقم الطلب غير صحيح.");
+        setLoading(false);
+        return;
+      }
 
-  // The bid detail contains item IDs required by unavailableItems.
-  const bidDetailQuery = useBidDetail(apiOrder?.id ?? "");
-  const submitOffer = useSubmitOffer();
+      try {
+        const detail = await OrdersAPI.getBid(id);
+        if (!current) return;
+        const bid = {
+          ...detail,
+          orderId: id,
+          bidStatus: detail.bidStatus ?? (editOffer ? "Submitted" : "Open"),
+          createdDate: detail.createdDate ?? "",
+          customerName: detail.customerName ?? "",
+          customerPhone: detail.customerPhone ?? "",
+          paymentMethod: detail.paymentMethod ?? "Cash",
+          itemCount: detail.itemCount ?? detail.items?.length ?? 0,
+          estimatedSubTotal: detail.estimatedSubTotal ?? 0,
+        } as BidListItem;
+        if (!editOffer && bid.bidStatus !== "Open") {
+          setPageError("لم يعد هذا الطلب مفتوحًا لاستقبال العروض.");
+          return;
+        }
+        const mappedOrder = mapBidToOrder(bid, detail);
+        setOrder(mappedOrder);
+        const existingOffer = (detail.myOffer ?? bid.myOffer) as JsonRecord | null;
+        setIsEditingOffer(Boolean(editOffer && existingOffer?.id));
+        if (editOffer && existingOffer) {
+          const draft = await fillAlternativePrices(toOfferFormPayload(mappedOrder, existingOffer));
+          if (!current) return;
+          setSavedOfferDraft(draft);
+        }
+      } catch (error) {
+        setPageError(
+          error instanceof ApiError
+            ? error.message
+            : "تعذر تحميل الطلب من الخادم.",
+        );
+      } finally {
+        if (current) setLoading(false);
+      }
+    };
+    void loadBid();
+    return () => {
+      current = false;
+    };
+  }, [editOffer, orderNo]);
 
   const goBack = () => navigate({ to: "/pharmacy/orders" });
+  const goToOrders = () => navigate({ to: "/pharmacy/orders" });
 
-  const handleSubmit = async (form: OfferSubmissionPayload) => {
-    if (!apiOrder || !order) {
-      setSubmitError("بيانات الطلب غير مكتملة. يرجى إعادة تحميل الصفحة.");
+  const withdrawOffer = async () => {
+    if (!order?.offerId) {
+      toast.error("لا يوجد عرض قابل للسحب.");
       return;
     }
-
-    if (!bidDetailQuery.data) {
-      setSubmitError("تعذر تحميل تفاصيل الطلب اللازمة لإرسال العرض.");
-      return;
-    }
-
-    setSubmitError("");
-
+    if (!window.confirm("سحب العرض نهائيًا؟ لن يظهر العرض للعميل بعد ذلك.")) return;
     try {
-      const bidItems = bidDetailQuery.data.items ?? [];
-
-      const unavailableItems: SubmitOfferRequest["unavailableItems"] = order.products
-        .filter((product) => product.available === false)
-        .map((product) => {
-          const originalItem = bidItems.find(
-            (item) => String(item.productName ?? "").trim() === product.name.trim(),
-          );
-
-          if (!originalItem || !Number.isInteger(Number(originalItem.id))) {
-            throw new Error(`تعذر تحديد معرّف المنتج المطلوب: ${product.name}`);
-          }
-
-          const alternatives = form.alternatives[product.name] ?? [];
-
-          if (alternatives.length === 0) {
-            throw new Error(`يرجى اختيار بديل للمنتج غير المتوفر: ${product.name}`);
-          }
-
-          const alternativeProductIds = alternatives.map((alternative) => {
-            const id = Number(alternative.id);
-
-            if (!Number.isInteger(id) || id <= 0) {
-              throw new Error(`معرّف المنتج البديل غير صالح: ${alternative.name}`);
-            }
-
-            return id;
-          });
-
-          return {
-            orderItemId: Number(originalItem.id),
-            alternativeProductIds,
-          };
-        });
-
-      const payload: SubmitOfferRequest = {
-        discountPercentage: form.discountPercent,
-        preparationMinutes: form.preparationTime,
-        deliveryMinutes: form.deliveryTime,
-        deliveryFee: form.freeDelivery ? 0 : form.deliveryFee,
-        notes: form.notes || null,
-        unavailableItems,
-      };
-
-      await submitOffer.mutateAsync({
-        orderId: String(apiOrder.id),
-        payload,
-      });
-
-      goBack();
+      await OrdersAPI.withdrawBidOffer(order.offerId);
+      toast.success("تم سحب العرض");
+      goToOrders();
     } catch (error) {
-      setSubmitError(
-        error instanceof Error ? error.message : "تعذر إرسال العرض. يرجى المحاولة مرة أخرى.",
-      );
+      toast.error(error instanceof Error ? error.message : "تعذر سحب العرض.");
     }
   };
 
-  if (ordersQuery.isLoading) {
-    return (
-      <section dir="rtl" className="grid min-h-[60vh] place-items-center text-muted-foreground">
-        <span className="inline-flex items-center gap-2">
-          <LoaderCircle className="h-4 w-4 animate-spin" />
-          جارٍ تحميل الطلب...
-        </span>
-      </section>
-    );
-  }
+  const handleOfferSubmit = async (payload: OfferSubmissionPayload) => {
+    if (!order?.apiId) return;
+    try {
+      const request = toOfferRequest(
+        order,
+        isEditingOffer || defaultPreparationMinutes === null
+          ? payload
+          : { ...payload, preparationMinutes: defaultPreparationMinutes },
+      );
+      if (isEditingOffer) {
+        if (!order.offerId) throw new Error("تعذر تحديد العرض الحالي لتعديله.");
+        await OrdersAPI.updateBidOffer(order.offerId, request);
+      } else {
+        await OrdersAPI.submitBidOffer(order.apiId, request);
+      }
+      setSavedOfferDraft(payload);
+      setSubmittedOffer(payload);
+      toast.success(isEditingOffer ? "تم تحديث العرض" : "تم إرسال العرض");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر إرسال العرض.");
+    }
+  };
 
-  if (ordersQuery.isError) {
-    return (
-      <section dir="rtl" className="grid min-h-[60vh] place-items-center">
-        <div
-          role="alert"
-          className="max-w-md rounded-2xl border border-border bg-card p-8 text-center"
-        >
-          <CircleAlert className="mx-auto h-8 w-8 text-destructive" aria-hidden="true" />
-          <p className="mt-4 text-sm text-muted-foreground">تعذر تحميل الطلب من الخادم.</p>
-          <Button type="button" onClick={() => void ordersQuery.refetch()} className="mt-5">
-            إعادة المحاولة
-          </Button>
-        </div>
-      </section>
-    );
-  }
-
-  if (!order || order.status !== "open-bidding" || editOffer) {
+  if (loading || pageError || !order) {
     return (
       <section dir="rtl" className="grid min-h-[60vh] place-items-center">
         <div className="max-w-md rounded-2xl border border-border bg-card p-8 text-center shadow-sm">
           <CircleAlert className="mx-auto h-8 w-8 text-muted-foreground" aria-hidden="true" />
           <h1 className="mt-4 text-lg font-bold text-foreground">
-            {editOffer ? "تعديل العرض غير متاح" : "الطلب غير متاح لتقديم عرض"}
+            {loading ? "جارٍ تحميل الطلب..." : "الطلب غير متاح لتقديم عرض"}
           </h1>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            {editOffer
-              ? "تعديل العرض السابق يحتاج إلى تحميل بيانات العرض الحالي."
-              : "قد يكون الطلب مغلقاً أو لا يوجد طلب مطابق."}
+          <p role={pageError ? "alert" : undefined} className="mt-2 text-sm leading-6 text-muted-foreground">
+            {pageError || "يرجى الانتظار أثناء تحميل بيانات الطلب."}
           </p>
           <Button type="button" onClick={goBack} className="mt-5 gap-2">
             <ArrowRight className="h-4 w-4" />
@@ -156,16 +168,21 @@ function OfferPage() {
 
   return (
     <>
-      {submitError && (
-        <p role="alert" className="mx-auto mb-3 max-w-[1400px] text-right text-sm text-destructive">
-          {submitError}
-        </p>
-      )}
-
       <OfferSubmissionForm
         order={order}
+        isEditing={isEditingOffer}
+        initialPayload={isEditingOffer ? (savedOfferDraft ?? undefined) : undefined}
         onCancel={goBack}
-        onSubmit={(payload) => void handleSubmit(payload)}
+        onWithdraw={withdrawOffer}
+        onSubmit={handleOfferSubmit}
+      />
+      <OfferSuccessDialog
+        open={Boolean(submittedOffer)}
+        onOpenChange={(open) => {
+          if (!open) goToOrders();
+        }}
+        onGoToOrders={goToOrders}
+        onWithdraw={withdrawOffer}
       />
     </>
   );

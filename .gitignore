@@ -43,3 +43,6 @@ package-lock.json.backup
 .env
 .env.*
 !.env.example
+
+# Local Claude Code tooling
+.claude/

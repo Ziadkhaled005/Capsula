@@ -14,7 +14,20 @@ export const INVENTORY_KEYS = {
 export function useInventory(filters: InventoryFilter = {}) {
   return useQuery({
     queryKey: INVENTORY_KEYS.list(filters),
-    queryFn: () => InventoryAPI.getInventory(filters),
+    queryFn: () =>
+      InventoryAPI.getInventory({
+        search: filters.search,
+        page: filters.page,
+        pageSize: filters.pageSize,
+        status:
+          filters.stockStatus === "in-stock"
+            ? "Available"
+            : filters.stockStatus === "low-stock"
+              ? "Low"
+              : filters.stockStatus === "out-of-stock"
+                ? "OutOfStock"
+                : undefined,
+      }),
     staleTime: 60_000,
   });
 }
@@ -25,13 +38,7 @@ export function useInventory(filters: InventoryFilter = {}) {
 export function useUploadInventory() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({
-      file,
-      onProgress,
-    }: {
-      file: File;
-      onProgress?: (pct: number) => void;
-    }) => InventoryAPI.uploadInventory(file, onProgress),
+    mutationFn: ({ file }: { file: File }) => InventoryAPI.uploadInventory(file),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: INVENTORY_KEYS.all });
     },
@@ -44,8 +51,12 @@ export function useUploadInventory() {
 export function useUpdateInventoryItem() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, payload }: { id: string; payload: UpdateInventoryItemRequest }) =>
-      InventoryAPI.updateInventoryItem(id, payload),
+    mutationFn: ({ id, payload }: { id: string; payload: UpdateInventoryItemRequest }) => {
+      return InventoryAPI.updateInventory(Number(id), {
+        newQuantity: payload.stockCurrent,
+        price: payload.price,
+      });
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: INVENTORY_KEYS.all });
     },

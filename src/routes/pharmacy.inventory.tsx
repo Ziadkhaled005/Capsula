@@ -1,11 +1,24 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useRef, useEffect } from "react";
 import { Search, ChevronDown, Upload, ChevronLeft, ChevronRight, X, Info, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import searchIllustration from "@/assets/search-illustration.png";
 import dropdownIcon from "@/assets/dropdown-icon.png";
 import { cn } from "@/lib/utils";
 import { useUpload } from "@/contexts/upload-context";
-import { useInventory, useUploadInventory } from "@/hooks/useInventory";
+import { InventoryAPI, SuperAdminAPI, isApiConfigured } from "@/api";
+import type { JsonRecord } from "@/api/contracts";
+import { formatDate } from "@/lib/datetime";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
+
+type Item = {
+  name: string;
+  category: string;
+  stockCurrent: number;
+  updated: string;
+  price: number;
+  code: string;
+};
 
 function highlight(text: string, query: string) {
   if (!query) return text;
@@ -18,9 +31,12 @@ function highlight(text: string, query: string) {
 }
 
 export const Route = createFileRoute("/pharmacy/inventory")({
-  head: () => ({ meta: [{ title: "المخزون - صيدلية فينوس" }] }),
+  head: () => ({ meta: [{ title: "المخزون - لوحة الصيدلية" }] }),
   component: InventoryPage,
 });
+
+const previewColumns = ["تفاصيل المنتج", "الفئة", "المخزون الحالي", "اخر تحديث", "السعر", "الكود"];
+const previewRows: string[][] = [];
 
 const MAX_SIZE = 3 * 1024 * 1024;
 
@@ -29,11 +45,9 @@ function UploadModal({ onClose }: { onClose: () => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [sizeError, setSizeError] = useState(false);
   const [typeError, setTypeError] = useState(false);
-  const [uploadError, setUploadError] = useState("");
+  const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { setUploadNotification, setShowSuccessAlert, enforceMaxSize } = useUpload();
-  const uploadMutation = useUploadInventory();
-  const uploading = uploadMutation.isPending;
 
   const isError = sizeError || typeError;
 
@@ -78,7 +92,7 @@ function UploadModal({ onClose }: { onClose: () => void }) {
           <div className="flex items-start gap-3 rounded-lg bg-[#E5F6FD] px-4 py-3">
             <Info className="h-5 w-5 text-[#0288D1] shrink-0 mt-0.5" />
             <p className="text-sm text-[#014361] leading-relaxed text-right">
-              يرجى رفع ملف بصيغة <strong>.xlsx</strong> أو <strong>.csv</strong> يحتوي على بيانات المخزون المحدثة. لا يتوفر نموذج أعمدة موثق في واجهة التطبيق؛ يرجى استخدام النموذج المعتمد من مسؤول النظام.
+              يرجى رفع ملف بصيغة <strong>.xlsx</strong> أو <strong>.csv</strong> يحتوي على بيانات المخزون المحدثة. تأكد من أن الأعمدة تطابق النموذج المعروض أدناه.
             </p>
           </div>
 
@@ -132,9 +146,34 @@ function UploadModal({ onClose }: { onClose: () => void }) {
                 صيغة الملف غير مدعومة. يرجى رفع ملف بصيغة .xlsx أو .csv فقط.
               </p>
             )}
-            {uploadError && <p role="alert" className="text-xs font-medium text-[#BA1A1A] mt-1">{uploadError}</p>}
           </div>
 
+          {/* Preview Table */}
+          <div className="rounded-lg border border-border overflow-hidden">
+            <div className="bg-[#CFD8DC] px-4 py-2">
+              <p className="text-xs font-medium text-foreground/70 text-right">نموذج البيانات المطلوبة</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs" dir="rtl">
+                <thead>
+                  <tr className="border-b border-border bg-[#ECEFF1]">
+                    {previewColumns.map((col) => (
+                      <th key={col} className="text-right font-medium text-foreground/70 py-2.5 px-3 whitespace-nowrap border-l border-border/50 last:border-l-0">{col}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {previewRows.map((row, i) => (
+                    <tr key={i} className={cn("border-b border-border last:border-b-0", i % 2 === 1 && "bg-[#ECEFF1]/50")}>
+                      {row.map((cell, j) => (
+                        <td key={j} className="py-2.5 px-3 text-right text-foreground/80 whitespace-nowrap border-l border-border/50 last:border-l-0">{cell}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
 
         {/* Footer */}
@@ -148,25 +187,22 @@ function UploadModal({ onClose }: { onClose: () => void }) {
           </button>
           <button
             disabled={!file || uploading}
-            onClick={() => {
+            onClick={async () => {
               if (!file) return;
-              setUploadError("");
-              setUploadNotification({ filename: file.name });
-              uploadMutation.mutate({ file }, {
-                onSuccess: (result) => {
+              setUploading(true);
+              try {
+                await InventoryAPI.uploadInventory(file);
+                setUploadNotification({ filename: file.name });
+                setUploading(false);
+                onClose();
+                setTimeout(() => {
                   setUploadNotification(null);
-                  if (!result.success) {
-                    setUploadError(result.errors[0]?.message ?? "لم يؤكد الخادم نجاح الاستيراد.");
-                    return;
-                  }
-                  onClose();
                   setShowSuccessAlert(true);
-                },
-                onError: () => {
-                  setUploadNotification(null);
-                  setUploadError("تعذر رفع الملف. يرجى المحاولة مرة أخرى.");
-                },
-              });
+                }, 3000);
+              } catch (error) {
+                toast.error(error instanceof Error ? error.message : "تعذر رفع ملف المخزون.");
+                setUploading(false);
+              }
             }}
             className="inline-flex items-center gap-2 px-6 py-2.5 rounded-full bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
@@ -182,22 +218,75 @@ function UploadModal({ onClose }: { onClose: () => void }) {
 function InventoryPage() {
   const [query, setQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("كل الفئات");
-  const [page, setPage] = useState(1);
   const [categoryOpen, setCategoryOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [items, setItems] = useState<Item[]>([]);
+  const [totalItems, setTotalItems] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
+  const [categoryList, setCategoryList] = useState<JsonRecord[]>([]);
   const categoryRef = useRef<HTMLDivElement>(null);
-  const inventoryQuery = useInventory({
-    search: query || undefined,
-    category: selectedCategory === "كل الفئات" ? undefined : selectedCategory,
-    page,
-    pageSize: 10,
-  });
-  const items = inventoryQuery.data?.data ?? [];
-  const categories = ["كل الفئات", ...(inventoryQuery.data?.categories ?? [])];
+  const debouncedQuery = useDebouncedValue(query);
+  const categoryId = categoryList.find((c) => c.name === selectedCategory)?.id as number | undefined;
+
+  useEffect(() => {
+    SuperAdminAPI.getCategories()
+      .then(setCategoryList)
+      .catch(() => setCategoryList([]));
+  }, []);
 
   useEffect(() => {
     setPage(1);
-  }, [query, selectedCategory]);
+  }, [debouncedQuery, categoryId]);
+
+  useEffect(() => {
+    let current = true;
+
+    async function loadInventory() {
+      setLoading(true);
+      setLoadError("");
+      if (!isApiConfigured) {
+        setLoadError("لم يتم ربط واجهة API الحقيقية بعد.");
+        setLoading(false);
+        return;
+      }
+      try {
+        const response = await InventoryAPI.getInventory({
+          search: debouncedQuery.trim() || undefined,
+          categoryId,
+          page,
+          pageSize,
+        });
+        if (!current) return;
+        setItems(
+          response.items.map((item) => ({
+            name: item.productName,
+            category: item.categoryName ?? "غير مصنف",
+            stockCurrent: item.quantity,
+            updated: formatDate(item.lastUpdated),
+            price: item.price,
+            code: String(item.productId),
+          })),
+        );
+        setTotalItems(response.totalCount);
+      } catch (error) {
+        if (current) setLoadError(error instanceof Error ? error.message : "تعذر تحميل المخزون.");
+      } finally {
+        if (current) setLoading(false);
+      }
+    }
+
+    void loadInventory();
+    return () => {
+      current = false;
+    };
+  }, [reloadKey, debouncedQuery, categoryId, page, pageSize]);
+
+  const categories = ["كل الفئات", ...categoryList.map((category) => String(category.name))];
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -298,29 +387,39 @@ function InventoryPage() {
               </tr>
             </thead>
             <tbody>
-              {inventoryQuery.isLoading ? (
-                <tr><td colSpan={6} className="py-12 text-center text-muted-foreground">جارٍ تحميل المخزون...</td></tr>
-              ) : inventoryQuery.isError ? (
-                <tr>
-                  <td colSpan={6} className="py-12 text-center text-destructive">
-                    <p>تعذر تحميل المخزون.</p>
-                    <button type="button" onClick={() => void inventoryQuery.refetch()} className="mt-2 underline">إعادة المحاولة</button>
-                  </td>
-                </tr>
-              ) : items.length === 0 ? (
-                <tr>
-                  <td colSpan={6}>
-                    <div className="flex flex-col items-center justify-center py-24 gap-4" dir="rtl">
-                      <img src={searchIllustration} alt="" className="w-28 h-28 object-contain" />
-                      <div className="text-center">
-                        <p className="text-base font-semibold text-foreground">لا توجد نتائج</p>
-                        <p className="text-sm text-muted-foreground mt-1">لم يتم العثور على نتائج تطابق بحثك.</p>
-                      </div>
-                    </div>
-                  </td>
-                </tr>
-              ) : items.map((it) => (
-                  <tr key={it.id} className="border-t border-border">
+              {(() => {
+                // Search and category are filtered server-side.
+                const filtered = items;
+                if (loading || loadError || filtered.length === 0) {
+                  return (
+                    <tr>
+                      <td colSpan={6}>
+                        <div className="flex flex-col items-center justify-center py-24 gap-4" dir="rtl">
+                          {!loading && !loadError && <img src={searchIllustration} alt="" className="w-28 h-28 object-contain" />}
+                          <div className="text-center">
+                            <p className="text-base font-semibold text-foreground">
+                              {loading ? "جارٍ تحميل المخزون..." : loadError ? loadError : "لا توجد بيانات مخزون حقيقية متاحة"}
+                            </p>
+                            {!loading && !loadError && (
+                              <p className="text-sm text-muted-foreground mt-1">ستظهر المنتجات بعد وصول بيانات حقيقية من الخادم.</p>
+                            )}
+                            {loadError && (
+                              <button
+                                type="button"
+                                onClick={() => setReloadKey((key) => key + 1)}
+                                className="mt-3 text-sm font-medium text-primary underline"
+                              >
+                                إعادة المحاولة
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                }
+                return filtered.map((it, idx) => (
+                  <tr key={idx} className="border-t border-border">
                     <td className="py-4 px-6">
                       <div className="flex items-center gap-3 justify-start">
                         <div className="h-12 w-12 rounded-md bg-muted flex items-center justify-center overflow-hidden shrink-0">
@@ -331,15 +430,14 @@ function InventoryPage() {
                     </td>
                     <td className="py-4 px-2 text-right text-foreground border-r border-border">{it.category}</td>
                     <td className="py-4 px-2 text-right text-foreground">
-                      <span className="text-muted-foreground">{it.stockTotal} / </span>
                       <span className="font-bold">{it.stockCurrent}</span>
                     </td>
-                    <td className="py-4 px-2 text-right text-foreground">{it.lastUpdated}</td>
+                    <td className="py-4 px-2 text-right text-foreground">{it.updated}</td>
                     <td className="py-4 px-2 text-right text-foreground">{it.price.toFixed(2)} ج.م / عبوة</td>
-                    <td className="py-4 px-6 text-right text-foreground">{it.sku}</td>
+                    <td className="py-4 px-6 text-right text-foreground">{it.code}</td>
                   </tr>
-                ))
-              }
+                ));
+              })()}
             </tbody>
           </table>
         </div>
@@ -347,25 +445,25 @@ function InventoryPage() {
         {/* Pagination */}
         <div className="border-t border-border pt-4 flex items-center justify-end gap-6 text-sm text-muted-foreground">
           <div className="flex items-center gap-2">
-            <span>الصفوف: 10</span>
+            <span>Rows per page:</span>
+            <button className="inline-flex items-center gap-1 px-2 py-1 hover:bg-muted/50 rounded">
+              <span>10</span>
+              <ChevronDown className="h-3.5 w-3.5" />
+            </button>
           </div>
-          <div>
-            {inventoryQuery.data
-              ? `${(page - 1) * inventoryQuery.data.pageSize + (items.length ? 1 : 0)}-${(page - 1) * inventoryQuery.data.pageSize + items.length} من ${inventoryQuery.data.total}`
-              : "—"}
-          </div>
+          <div>عرض {items.length} من {totalItems}</div>
           <div className="flex items-center gap-1">
             <button
-              disabled={page <= 1 || inventoryQuery.isFetching}
-              onClick={() => setPage((current) => Math.max(1, current - 1))}
-              className="h-8 w-8 rounded flex items-center justify-center hover:bg-muted/50 disabled:opacity-40"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="h-8 w-8 rounded flex items-center justify-center hover:bg-muted/50"
             >
               <ChevronRight className="h-4 w-4" />
             </button>
             <button
-              disabled={!inventoryQuery.data || page >= inventoryQuery.data.totalPages || inventoryQuery.isFetching}
-              onClick={() => setPage((current) => current + 1)}
-              className="h-8 w-8 rounded flex items-center justify-center hover:bg-muted/50 disabled:opacity-40"
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+              className="h-8 w-8 rounded flex items-center justify-center hover:bg-muted/50"
             >
               <ChevronLeft className="h-4 w-4" />
             </button>

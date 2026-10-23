@@ -8,7 +8,7 @@ export type OrderStatus =
   | "delivered"
   | "cancelled";
 
-export type PaymentMethod = "cash" | "card" | "card-on-delivery";
+export type PaymentMethod = "cash" | "card";
 
 export interface OrderProduct {
   id: string;
@@ -40,8 +40,6 @@ export interface Order {
     addressDetail?: string;
   };
   products: OrderProduct[];
-  /** Count returned by list endpoints; may be available before product details load. */
-  itemCount?: number;
   status: OrderStatus;
   payment: PaymentMethod;
   subtotal: number;
@@ -92,24 +90,4 @@ export interface ProposeAlternativeResponse {
   success: boolean;
   orderId: string;
   newStatus: OrderStatus;
-}
-
-export type BackendOrderStatus =
-  | "PendingConfirmation"
-  | "Confirmed"
-  | "OnHold"
-  | "InPreparation"
-  | "InRoute"
-  | "Delivered"
-  | "Cancelled"
-  | "WaitingForOffers";
-
-export interface SubmitOfferRequest {
-  discountPercentage: number;
-  preparationMinutes: number;
-  deliveryMinutes: number;
-  deliveryFee: number;
-  notes?: string | null;
-  prescriptionAmount?: number | null;
-  unavailableItems: { orderItemId: number; alternativeProductIds: number[] }[];
 }

@@ -10,33 +10,25 @@ export const Route = createFileRoute("/login")({
 
 function LoginPage() {
   const navigate = useNavigate();
-  const loginMutation = useLogin();
+  const login = useLogin();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState(false);
-  const [loginError, setLoginError] = useState("");
-
-  const passwordTooShort = password.trim().length > 0 && password.length < 8;
+  const [error, setError] = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(false);
-    setLoginError("");
-
-    if (!email.trim() || !password.trim() || password.length < 8) {
-      setError(true);
+    if (!email.trim() || !password) {
+      setError("برجاء ادخال المستخدم و كلمة السر");
       return;
     }
-
+    setError("");
     try {
-      await loginMutation.mutateAsync({
-        email: email.trim(),
-        password,
-      });
-    } catch {
-      setLoginError("فشل تسجيل الدخول. تأكد من البريد الإلكتروني وكلمة المرور.");
+      await login.mutateAsync({ email: email.trim(), password });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "تعذر تسجيل الدخول. يرجى المحاولة مرة أخرى.");
     }
   };
+
 
   return (
     <div className="min-h-screen grid grid-cols-1 md:grid-cols-2" dir="rtl">
@@ -73,23 +65,20 @@ function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="البريد الإلكتروني"
-              autoComplete="username"
               className={`w-full h-12 rounded-full border bg-background px-5 text-sm text-right placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
                 error && !email.trim()
                   ? "border-destructive focus:ring-destructive/30"
                   : "border-border focus:ring-primary/30"
               }`}
             />
-
             <div className="space-y-1">
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="كلمة المرور"
-                autoComplete="current-password"
                 className={`w-full h-12 rounded-full border bg-background px-5 text-sm text-right placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
-                  (error && !password.trim()) || passwordTooShort
+                  error && !password
                     ? "border-destructive focus:ring-destructive/30"
                     : "border-border focus:ring-primary/30"
                 }`}
@@ -105,38 +94,18 @@ function LoginPage() {
             </div>
           </div>
 
-          {error && (!email.trim() || !password.trim()) && (
-            <div
-              role="alert"
-              className="rounded-lg border border-destructive bg-destructive/10 text-destructive text-sm px-4 py-3 text-right"
-            >
-              برجاء ادخال المستخدم و كلمة السر
-            </div>
-          )}
-
-          {passwordTooShort && (
+          {error && (
             <div className="rounded-lg border border-destructive bg-destructive/10 text-destructive text-sm px-4 py-3 text-right">
-              كلمة السر يجب أن تكون 8 أحرف على الأقل
-            </div>
-          )}
-
-          {loginError && (
-            <div
-              role="alert"
-              className="rounded-lg border border-destructive bg-destructive/10 text-destructive text-sm px-4 py-3 text-right"
-            >
-              {loginError}
+              {error}
             </div>
           )}
 
           <button
             type="submit"
-            disabled={
-              !email.trim() || !password.trim() || password.length < 8 || loginMutation.isPending
-            }
+            disabled={!email.trim() || !password || login.isPending}
             className="w-full h-12 rounded-full bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary"
           >
-            {loginMutation.isPending ? "جاري تسجيل الدخول..." : "تسجيل الدخول"}
+            {login.isPending ? "جارٍ تسجيل الدخول..." : "تسجيل الدخول"}
           </button>
         </form>
       </div>

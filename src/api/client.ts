@@ -1,126 +1,171 @@
-import axios, { AxiosError, type InternalAxiosRequestConfig } from "axios";
+export interface ApiValidationError {
+  identifier: string;
+  errorMessage: string;
+  errorCode: string;
+  severity: number;
+}
 
-const BASE_URL = (
-  import.meta.env.VITE_API_BASE_URL || "https://capsula.prognil.com"
-).replace(/\/+$/, "");
-
-export type ApiValidationError = {
-  identifier?: string;
-  errorMessage?: string;
-  errorCode?: string;
-  severity?: number;
-};
-
-export type ApiEnvelope<T> = {
+export interface ApiEnvelope<T> {
   value: T | null;
-  status?: number;
+  status: number;
   isSuccess: boolean;
   successMessage?: string;
   correlationId?: string;
   errors?: string[];
   validationErrors?: ApiValidationError[];
-};
+}
 
-export class ApiResponseError extends Error {
+export class ApiError extends Error {
   readonly errors: string[];
   readonly validationErrors: ApiValidationError[];
-  readonly status?: number;
+  readonly status: number;
   readonly correlationId?: string;
 
-  constructor(body: Partial<ApiEnvelope<unknown>>, fallback = "تعذر إكمال الطلب.") {
-    const errors = Array.isArray(body.errors) ? body.errors.filter(Boolean) : [];
-    const validationErrors = Array.isArray(body.validationErrors) ? body.validationErrors : [];
-    super(errors[0] || validationErrors[0]?.errorMessage || body.successMessage || fallback);
-    this.name = "ApiResponseError";
+  constructor(envelope: Partial<ApiEnvelope<unknown>>, httpStatus?: number) {
+    const errors = envelope.errors ?? [];
+    const validationErrors = envelope.validationErrors ?? [];
+    super(
+      [...errors, ...validationErrors.map((error) => error.errorMessage)]
+        .filter(Boolean)
+        .join("\n") || "تعذر إكمال الطلب. يرجى المحاولة مرة أخرى.",
+    );
+    this.name = "ApiError";
     this.errors = errors;
     this.validationErrors = validationErrors;
-    this.status = body.status;
-    this.correlationId = body.correlationId;
+    this.status = httpStatus ?? envelope.status ?? 500;
+    this.correlationId = envelope.correlationId;
   }
 }
 
-export const apiClient = axios.create({
-  baseURL: BASE_URL,
-  timeout: 20000,
-  headers: {
-    Accept: "application/json",
-    "Content-Type": "application/json",
-  },
-});
+// Accept the server origin (as the Dockerfile/CI pass it) or the full /api base.
+const RAW_API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.trim();
+const API_BASE_URL = RAW_API_BASE_URL
+  ? /\/api\/?$/i.test(RAW_API_BASE_URL)
+    ? RAW_API_BASE_URL
+    : `${RAW_API_BASE_URL.replace(/\/+$/, "")}/api`
+  : undefined;
 
-apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
-  if (typeof window !== "undefined") {
-    const token =
-      localStorage.getItem("accessToken") ||
-      localStorage.getItem("token");
-    if (token) config.headers.Authorization = `Bearer ${token}`;
+export class ApiNotConfiguredError extends Error {
+  constructor() {
+    super("لم يتم ربط واجهة API بعد. أضف VITE_API_BASE_URL عند تجهيز الخادم الحقيقي.");
+    this.name = "ApiNotConfiguredError";
   }
+}
 
-  // Let the browser set the multipart boundary for FormData.
-  if (typeof FormData !== "undefined" && config.data instanceof FormData) {
-    delete config.headers["Content-Type"];
+type ApiRequestOptions = {
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  body?: unknown;
+  params?: Record<string, string | number | boolean | undefined | null>;
+  responseType?: "json" | "blob";
+};
+
+function buildUrl(path: string, params?: ApiRequestOptions["params"]) {
+  if (!API_BASE_URL) throw new ApiNotConfiguredError();
+
+  const normalizedPath = path.replace(/^\/+/, "");
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params ?? {})) {
+    if (value !== undefined && value !== null && value !== "") {
+      search.set(key, String(value));
+    }
   }
+  const query = search.toString();
+  const baseUrl = API_BASE_URL.endsWith("/") ? API_BASE_URL : `${API_BASE_URL}/`;
+  const url = new URL(normalizedPath, baseUrl);
+  if (query) url.search = query;
+  return url.toString();
+}
 
-  return config;
-});
+function isFormData(value: unknown): value is FormData {
+  return typeof FormData !== "undefined" && value instanceof FormData;
+}
 
 function clearSession() {
   if (typeof window === "undefined") return;
-  for (const key of ["accessToken", "token", "refreshToken", "user"]) {
-    localStorage.removeItem(key);
-  }
+  localStorage.removeItem("token");
+  localStorage.removeItem("accessToken");
+  localStorage.removeItem("refreshToken");
+  localStorage.removeItem("user");
 }
 
-apiClient.interceptors.response.use(
-  (response) => {
-    const body = response.data as Partial<ApiEnvelope<unknown>> | undefined;
-    if (body && typeof body === "object" && body.isSuccess === false) {
-      throw new ApiResponseError(body, "فشل الطلب.");
-    }
-    return response;
-  },
-  (error: AxiosError) => {
-    if (error.response?.status === 401 && typeof window !== "undefined") {
-      const url = error.config?.url ?? "";
-      const isPublicAuthCall =
-        /\/api\/Auth\/(Login|ForgotPassword|ResetPassword)$/i.test(url);
+export async function apiRequest<T>(
+  path: string,
+  options: ApiRequestOptions = {},
+): Promise<T> {
+  const { method = "GET", body, params, responseType = "json" } = options;
+  const headers = new Headers({ Accept: responseType === "blob" ? "*/*" : "application/json" });
+  const token =
+    typeof window !== "undefined"
+      ? localStorage.getItem("token") ?? localStorage.getItem("accessToken")
+      : null;
 
-      if (!isPublicAuthCall) {
-        clearSession();
-        if (window.location.pathname !== "/login") {
-          window.location.assign("/login");
-        }
-      }
-    }
-    return Promise.reject(error);
-  },
-);
-
-export function unwrapApiResponse<T>(response: unknown): T {
-  if (response && typeof response === "object") {
-    const record = response as Record<string, unknown>;
-
-    // Handle the documented Capsula envelope. Failure is also checked here
-    // in case a caller passes a body that did not go through apiClient.
-    if (record.isSuccess === false) {
-      throw new ApiResponseError(record as Partial<ApiEnvelope<unknown>>);
-    }
-    if ("value" in record) return record.value as T;
-    if ("data" in record) return record.data as T;
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  if (body !== undefined && body !== null && !isFormData(body)) {
+    headers.set("Content-Type", "application/json");
   }
 
-  return response as T;
+  let requestBody: BodyInit | undefined;
+  if (body !== undefined && body !== null) {
+    requestBody = isFormData(body) || typeof body === "string" ? body : JSON.stringify(body);
+  }
+
+  const response = await fetch(buildUrl(path, params), {
+    method,
+    headers,
+    body: requestBody,
+  });
+
+  // Login answers 401 with its own message for bad credentials; only an
+  // authenticated request getting 401 means the session expired.
+  if (response.status === 401 && token && !path.replace(/^\/+/, "").startsWith("Auth/Login")) {
+    clearSession();
+    if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+      window.location.assign("/login");
+    }
+    throw new ApiError(
+      { errors: ["انتهت صلاحية الجلسة. يرجى تسجيل الدخول مرة أخرى."] },
+      401,
+    );
+  }
+
+  if (response.status === 204) {
+    return null as T;
+  }
+
+  if (responseType === "blob" && response.ok) {
+    return (await response.blob()) as T;
+  }
+
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new ApiError(
+      { errors: ["استجابة غير صالحة من خادم كبسولة."] },
+      response.status,
+    );
+  }
+
+  const envelope =
+    payload && typeof payload === "object"
+      ? (payload as Partial<ApiEnvelope<T>>)
+      : undefined;
+
+  if (!response.ok || envelope?.isSuccess === false) {
+    throw new ApiError(envelope ?? {}, response.status);
+  }
+
+  if (envelope && "value" in envelope) {
+    return envelope.value as T;
+  }
+
+  // A few older deployments return the resource directly instead of the
+  // documented envelope. Keep the boundary tolerant without hiding failures.
+  return payload as T;
 }
 
-export function getApiErrorMessage(error: unknown, fallback = "حدث خطأ. يرجى المحاولة مرة أخرى.") {
-  if (error instanceof ApiResponseError) return error.message;
-  if (axios.isAxiosError(error)) {
-    const body = error.response?.data as Partial<ApiEnvelope<unknown>> | undefined;
-    if (body) {
-      const first = body.errors?.[0] || body.validationErrors?.[0]?.errorMessage;
-      if (first) return first;
-    }
-    if (!error.response) return "تعذر الاتصال بالخادم. تحقق من الاتصال بالإنترنت.";
-  }
-  return error instanceof Error ? error.message : fallback;
+export async function downloadFile(path: string): Promise<Blob> {
+  return apiRequest<Blob>(path, { responseType: "blob" });
 }
+
+export const isApiConfigured = Boolean(API_BASE_URL);

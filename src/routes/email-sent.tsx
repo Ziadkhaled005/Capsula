@@ -43,19 +43,19 @@ function EmailSentPage() {
               لقد أرسلنا رابط إعادة تعيين كلمة المرور إلى
               {" "}
               <span className="font-medium text-foreground">{email || "بريدك الإلكتروني"}</span>
-              . يرجى التحقق من صندوق الوارد الخاص بك واتباع التعليمات لإعادة تعيين كلمة المرور.
+              . أدخل رمز التحقق المكوّن من 6 أرقام في الصفحة التالية لإعادة تعيين كلمة المرور.
             </p>
             <p className="text-xs text-muted-foreground">
-              لم يصلك البريد؟ تحقق من مجلد الرسائل غير المرغوب فيها أو حاول مرة أخرى.
+              الرمز صالح لمدة 5 دقائق. تحقق من مجلد الرسائل غير المرغوب فيها إذا لم يصلك.
             </p>
           </div>
 
           <button
             type="button"
-            onClick={() => navigate({ to: "/login" })}
+            onClick={() => navigate({ to: "/reset-password", search: { email } })}
             className="w-full h-12 rounded-full bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
           >
-            العودة إلى تسجيل الدخول
+            إدخال رمز التحقق
           </button>
         </div>
       </div>

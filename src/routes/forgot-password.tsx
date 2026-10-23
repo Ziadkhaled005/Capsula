@@ -1,8 +1,8 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { AuthAPI } from "@/api";
 import capsuleLogo from "@/assets/capsule-logo.png";
 import authBg from "@/assets/auth-bg.png";
+import { AuthAPI, ApiError } from "@/api";
 
 export const Route = createFileRoute("/forgot-password")({
   component: ForgotPasswordPage,
@@ -14,18 +14,21 @@ function ForgotPasswordPage() {
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState("");
 
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
     setSendError("");
-    const normalizedEmail = email.trim();
-    if (!normalizedEmail) return;
+    if (!email.trim()) return;
 
     setSending(true);
     try {
-      await AuthAPI.forgotPassword({ email: normalizedEmail });
-      navigate({ to: "/reset-password", search: { email: normalizedEmail } });
+      await AuthAPI.forgotPassword(email.trim());
+      navigate({ to: "/email-sent", search: { email: email.trim() } });
     } catch (error) {
-      setSendError(error instanceof Error ? error.message : "تعذر إرسال رمز التحقق. يرجى المحاولة مرة أخرى.");
+      setSendError(
+          error instanceof ApiError
+          ? error.message
+          : "حدث خطأ أثناء إرسال رمز التحقق. يرجى المحاولة مرة أخرى.",
+      );
     } finally {
       setSending(false);
     }
@@ -55,23 +58,21 @@ function ForgotPasswordPage() {
         <form onSubmit={handleSubmit} className="w-full max-w-md space-y-6 text-right">
           <div className="space-y-2">
             <h1 className="text-2xl font-bold text-foreground">نسيت كلمة المرور</h1>
-            <p className="text-sm text-muted-foreground">سنرسل رمز تحقق إلى بريدك الإلكتروني لإعادة تعيين كلمة المرور.</p>
+            <p className="text-sm text-muted-foreground">إعادة تعيين كلمة المرور لحسابك في كبسولة</p>
           </div>
 
-          <label className="block space-y-2">
-            <span className="text-sm font-medium">البريد الإلكتروني</span>
-            <input
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="البريد الإلكتروني"
-              required
-              className="w-full h-12 rounded-full border border-border bg-background px-5 text-sm text-right placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-            />
-          </label>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="البريد الإلكتروني"
+            required
+            className="w-full h-12 rounded-full border border-border bg-background px-5 text-sm text-right placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+          />
 
-          {sendError && <p role="alert" className="text-sm text-destructive">{sendError}</p>}
+          {sendError && (
+            <p className="text-sm text-destructive">{sendError}</p>
+          )}
 
           <button
             type="submit"
@@ -83,7 +84,9 @@ function ForgotPasswordPage() {
                 <span className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
                 جارٍ الإرسال...
               </>
-            ) : "إرسال رمز التحقق"}
+            ) : (
+              "إرسال رمز التحقق"
+            )}
           </button>
         </form>
       </div>

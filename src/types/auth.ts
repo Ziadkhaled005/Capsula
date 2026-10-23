@@ -3,16 +3,13 @@ export interface User {
   name: string;
   email: string;
   role: "admin" | "pharmacist";
+  roles?: string[];
   pharmacyId?: string;
   pharmacyName?: string;
   avatar?: string;
 }
 
-export interface LoginRequest {
-  email: string;
-  password: string;
-}
-
+/** Legacy view-model retained for existing non-auth UI components. */
 export interface LoginResponse {
   user: User;
   accessToken: string;
@@ -20,27 +17,12 @@ export interface LoginResponse {
   expiresIn: number;
 }
 
-export interface RefreshTokenRequest {
-  refreshToken: string;
-}
-
-export interface RefreshTokenResponse {
-  accessToken: string;
-  refreshToken: string;
-  expiresIn: number;
+export interface LoginRequest {
+  email: string;
+  password: string;
 }
 
 export interface ChangePasswordRequest {
   currentPassword: string;
   newPassword: string;
-}
-
-export interface ResetPasswordRequest {
-  email: string;
-  otpCode: string;
-  newPassword: string;
-}
-
-export interface ForgotPasswordRequest {
-  email: string;
 }
