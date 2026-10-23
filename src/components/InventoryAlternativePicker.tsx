@@ -54,11 +54,11 @@ export function InventoryAlternativePicker({
       setLoadError(false);
 
       try {
-        // Any product with stock can be offered. The API's "Available" status only
-        // covers quantities above the medium threshold, so Low and Medium stock
-        // would be hidden; filter on quantity instead and search on the server.
+        // Any product with stock can be offered. hasStock covers every stock status
+        // (the "Available" status alone excludes Low and Medium stock).
         const response = await InventoryAPI.getInventory({
           search: debouncedSearch.trim() || undefined,
+          hasStock: true,
           pageSize: 100,
         });
 

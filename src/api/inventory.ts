@@ -5,6 +5,8 @@ export async function getInventory(params: {
   categoryId?: number;
   search?: string;
   status?: "OutOfStock" | "Low" | "Medium" | "Available";
+  /** true = only products with quantity above zero (any stock status). */
+  hasStock?: boolean;
   page?: number;
   pageSize?: number;
 } = {}): Promise<Paged<InventoryDto>> {
